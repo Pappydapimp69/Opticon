@@ -1,0 +1,129 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0e0f13;
+  color: #e9eef6;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+#ui {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 340px;
+  height: 100%;
+  background: #12141b;
+  border-right: 1px solid #232634;
+  box-shadow: 0 0 20px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+
+.panel {
+  padding: 16px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 8px 0;
+}
+
+.row {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.controls button {
+  background: #1b1e29;
+  border: 1px solid #2a2e3f;
+  color: #e9eef6;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.controls button:hover {
+  background: #23283a;
+}
+
+.log {
+  flex: 1;
+  background: #0f1117;
+  border: 1px solid #222638;
+  padding: 8px;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  overflow: auto;
+}
+
+#game {
+  margin-left: 340px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.map-maker {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 16, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.map-maker__panel {
+  background: #161924;
+  border: 1px solid #232634;
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 480px;
+  max-width: 720px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.map-maker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.map-maker__header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.map-maker__header button {
+  background: #1b1e29;
+  border: 1px solid #2a2e3f;
+  color: #e9eef6;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.map-maker__header button:hover {
+  background: #23283a;
+}
+
+.map-maker__content {
+  min-height: 200px;
+  font-size: 14px;
+  opacity: 0.85;
+}

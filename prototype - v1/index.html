@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Panopticon Prototype</title>
+  <link rel="stylesheet" href="styles.css?v=20250927-0132" />
+  <!-- Phaser CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.0/dist/phaser.min.js"></script>
+</head>
+<body>
+  <div id="ui">
+    <div class="panel">
+      <h1>Panopticon Prototype</h1>
+      <div class="row"><strong>Turn:</strong> <span id="turnLabel">Prisoner</span></div>
+      <div class="row"><strong>Role View:</strong> <span id="roleLabel">Prisoner</span></div>
+      <div class="row"><strong>Watcher Facing:</strong> <span id="facingLabel">North</span></div>
+      <div class="row"><strong>Move Points:</strong> <span id="mpLabel">3</span></div>
+      <div class="row"><strong>Build:</strong> <span id="buildLabel">(loading)</span></div>
+
+      <div class="controls">
+        <button id="switchViewBtn">Switch View (Watcher/Prisoner)</button>
+        <button id="endTurnBtn">End Turn</button>
+      </div>
+
+      <div class="controls watcher">
+        <button id="rotLeftBtn">Rotate Left (90°)</button>
+        <button id="rotRightBtn">Rotate Right (90°)</button>
+        <button id="bluffEBtn">Bluff East/West</button>
+        <button id="bluffNSBtn">Bluff North/South</button>
+      </div>
+
+      <div class="controls prisoner">
+        <div>Move with Arrow Keys. Up to 3 per turn. Moving 2+ creates noise at start tile.</div>
+      </div>
+
+      <div class="row"><strong>Log</strong></div>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <div id="game"></div>
+
+  <script src="main.js?v=20250927-0132"></script>
+</body>
+</html>
