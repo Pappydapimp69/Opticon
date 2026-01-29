@@ -1,5 +1,5 @@
-// main.js - Fixed: Native gamepad polling + horizontal split select + instant audio
-// No Phaser gamepad wrapper, direct navigator.getGamepads() detection
+// Opticon v3 – Probation Final: Native Gamepad + Split Select + Instant Audio + Hold End Turn
+// Zane – January 2026 – No Phaser wrapper, direct browser API
 
 const TILE_SIZE = 20;
 const GRID = 31;
@@ -47,14 +47,14 @@ class PlayerSelectScene extends Phaser.Scene {
     // Prisoner left
     this.add.rectangle(0, 0, cx, h, 0x112244, 0.7).setOrigin(0);
     this.add.text(cx / 2, cy - 100, 'PRISONER', { fontSize: '52px', color: '#88ccff', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5);
-    const prisonerArea = this.add.rectangle(cx / 2, cy, cx - 40, h - 100, 0x224466, 0).setOrigin(0.5).setInteractive();
-    this.add.text(cx / 2, cy + 20, 'Human as Prisoner\n(AI Watcher)', { fontSize: '28px', color: '#d0e0ff', align: 'center' }).setOrigin(0.5);
+    const pArea = this.add.rectangle(cx / 2, cy, cx - 40, h - 100, 0x224466, 0).setOrigin(0.5).setInteractive();
+    this.add.text(cx / 2, cy + 20, 'Prisoner (AI Watcher)', { fontSize: '28px', color: '#d0e0ff' }).setOrigin(0.5);
 
     // Watcher right
     this.add.rectangle(cx, 0, cx, h, 0x220011, 0.7).setOrigin(0);
     this.add.text(cx + cx / 2, cy - 100, 'WATCHER', { fontSize: '52px', color: '#ff8888', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5);
-    const watcherArea = this.add.rectangle(cx + cx / 2, cy, cx - 40, h - 100, 0x441122, 0).setOrigin(0.5).setInteractive();
-    this.add.text(cx + cx / 2, cy + 20, 'Human as Watcher\n(AI Prisoner)', { fontSize: '28px', color: '#ffd0d0', align: 'center' }).setOrigin(0.5);
+    const wArea = this.add.rectangle(cx + cx / 2, cy, cx - 40, h - 100, 0x441122, 0).setOrigin(0.5).setInteractive();
+    this.add.text(cx + cx / 2, cy + 20, 'Watcher (AI Prisoner)', { fontSize: '28px', color: '#ffd0d0' }).setOrigin(0.5);
 
     // 2-player bottom
     const twoArea = this.add.rectangle(cx, h - 100, 400, 120, 0x1a2238, 0.9).setOrigin(0.5).setInteractive();
@@ -63,20 +63,20 @@ class PlayerSelectScene extends Phaser.Scene {
     // Status
     this.statusText = this.add.text(cx, h - 200, 'Detecting controllers...', { fontSize: '22px', color: '#a0b0c0' }).setOrigin(0.5);
 
-    // Poll gamepads immediately and every 100ms
+    // Poll native gamepads
     this.updateGamepadStatus();
     this.time.addEvent({ delay: 100, callback: this.updateGamepadStatus, callbackScope: this, loop: true });
 
     // Instant audio
     this.playIntroMusic();
 
-    prisonerArea.on('pointerdown', () => {
+    pArea.on('pointerdown', () => {
       gameConfig.humans = 1;
       gameConfig.humanRole = 'Prisoner';
       this.startGame();
     });
 
-    watcherArea.on('pointerdown', () => {
+    wArea.on('pointerdown', () => {
       gameConfig.humans = 1;
       gameConfig.humanRole = 'Watcher';
       this.startGame();
@@ -93,10 +93,10 @@ class PlayerSelectScene extends Phaser.Scene {
     let count = 0;
     for (let pad of pads) if (pad) count++;
 
-    let msg = `Controllers: ${count} detected`;
+    let msg = `Controllers: ${count}`;
     if (count >= 1) msg += ' – P1 ready';
     if (count >= 2) msg += ' – P2 ready';
-    if (count === 0) msg += ' – Keyboard only';
+    if (count === 0) msg += ' – Keyboard';
     this.statusText.setText(msg);
 
     gameConfig.input.p1 = count >= 1 ? 'controller' : 'keyboard';
@@ -178,9 +178,8 @@ class MainGameScene extends Phaser.Scene {
   update(time, delta) {
     state.noiseMarkers = state.noiseMarkers.filter(m => (m.ttl -= delta / 1000) > 0);
 
-    // Raw native gamepad polling - P1 = first pad
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads[0];
+    const pad = pads[0]; // P1
 
     if (state.turn === "Prisoner" && pad) {
       const ax = pad.axes[0] || 0;
@@ -196,14 +195,13 @@ class MainGameScene extends Phaser.Scene {
 
     if (state.turn === "Watcher" && pad) {
       if (pad.buttons[0].pressed) this.endTurn();     // A
-      if (pad.buttons[3].pressed) this.setBluff(0);   // Y North
-      if (pad.buttons[1].pressed) this.setBluff(1);   // B East
-      if (pad.buttons[2].pressed) this.setBluff(2);   // X South
-      if (pad.buttons[5].pressed) this.rotateWatcher(1); // RB right
-      if (pad.buttons[4].pressed) this.rotateWatcher(-1); // LB left
+      if (pad.buttons[3].pressed) this.setBluff(0);   // Y
+      if (pad.buttons[1].pressed) this.setBluff(1);   // B
+      if (pad.buttons[2].pressed) this.setBluff(2);   // X
+      if (pad.buttons[5].pressed) this.rotateWatcher(1); // RB
+      if (pad.buttons[4].pressed) this.rotateWatcher(-1); // LB
     }
 
-    // Hold A or Space to end turn
     const isHolding = (pad && pad.buttons[0].pressed) || this.input.keyboard.addKey('SPACE').isDown;
     if (isHolding) {
       state.endHoldProgress += delta / 3000;
@@ -246,8 +244,8 @@ class MainGameScene extends Phaser.Scene {
 
     const isPrisonerTurn = state.turn === "Prisoner";
     this.controlsText.setText(isPrisonerTurn
-      ? "Arrows / D-pad / Left Stick: Move (max 3)\nHold A / Space 3s: End Turn"
-      : "Q / LB: Rotate Left    E / RB: Rotate Right\n1/Y: Bluff North    2/B: East    3/X: South\nHold A / Space 3s: End Turn"
+      ? "Arrows / D-pad / Left Stick: Move\nHold A / Space 3s: End Turn"
+      : "Q / LB: Rotate Left   E / RB: Right\n1/Y: North   2/B: East   3/X: South\nHold A / Space 3s: End Turn"
     );
 
     const width = 340 * state.endHoldProgress;
@@ -267,7 +265,7 @@ class MainGameScene extends Phaser.Scene {
     osc.stop(this.sound.context.currentTime + (type === 'turn_start' ? 1.2 : 0.18));
   }
 
-  // ... (keep tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, helpers)
+  // Keep your existing tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, helpers
 }
 
 const config = {
