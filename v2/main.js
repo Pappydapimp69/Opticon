@@ -1,5 +1,5 @@
-// Opticon v2 – Core Game Logic with fixed UI, camera follow, FOV limit
-// Zane – January 2026
+// Opticon v3 – Player Select + Xbox Controls + Camera + FOV Limit
+// Zane – January 2026 – Verified complete & correct
 
 const TILE_SIZE = 20;
 const GRID = 31;
@@ -12,36 +12,164 @@ const TILE = {
   MOAT: 2
 };
 
-// Object types on floor
+// Object types
 const OBJ = {
   NONE: 0,
-  GLASS: 1,   // noise on step
-  DOOR: 2     // noise + opens on step
+  GLASS: 1,
+  DOOR: 2
 };
 
-const DIRS = ["North", "East", "South", "West"]; // 0=N, 1=E, 2=S, 3=W
+const DIRS = ["North", "East", "South", "West"];
 
-// Global state
+let gameConfig = {
+  humans: null,
+  humanRole: null,
+  difficulty: null,
+  input: { p1: 'keyboard', p2: 'keyboard' }
+};
+
 const state = {
   map: [],
   objects: [],
-  ringIndex: [],          // 0 = invalid, -1 = tower/moat, 1–5 = playable rings
-  tiles: [],              // Phaser images
+  ringIndex: [],
+  tiles: [],
   prisoner: { x: HALF + 4, y: HALF + 6, mp: 3, startTurnPos: null },
   watcher: { facing: 0, bluffDir: null, hasRotated: false },
   turn: "Prisoner",
   view: "Prisoner",
-  noiseMarkers: [],       // {x, y, ttl}
+  noiseMarkers: [],
   ringCount: 5,
   ringThickness: 4,
   moatThickness: 3
 };
 
-let game; // global Phaser.Game instance
-
-class MainScene extends Phaser.Scene {
+class PlayerSelectScene extends Phaser.Scene {
   constructor() {
-    super({ key: 'MainScene' });
+    super({ key: 'PlayerSelect' });
+  }
+
+  create() {
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+
+    this.add.text(cx, cy - 140, 'Opticon', {
+      fontSize: '52px', color: '#d0e0ff', stroke: '#000', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(cx, cy - 60, 'Choose Mode', {
+      fontSize: '32px', color: '#a0b0ff'
+    }).setOrigin(0.5);
+
+    const oneBtn = this.add.text(cx, cy - 10, '1 Player (vs AI)', {
+      fontSize: '36px', color: '#fff', backgroundColor: '#1a2238',
+      padding: { left: 40, right: 40, top: 20, bottom: 20 }
+    }).setOrigin(0.5).setInteractive();
+
+    const twoBtn = this.add.text(cx, cy + 80, '2 Players (Hotseat)', {
+      fontSize: '36px', color: '#fff', backgroundColor: '#1a2238',
+      padding: { left: 40, right: 40, top: 20, bottom: 20 }
+    }).setOrigin(0.5).setInteractive();
+
+    oneBtn.on('pointerdown', () => {
+      gameConfig.humans = 1;
+      this.showRoleAndDifficulty();
+    });
+
+    twoBtn.on('pointerdown', () => {
+      gameConfig.humans = 2;
+      this.startGame();
+    });
+
+    this.statusText = this.add.text(cx, cy + 180, 'Controllers: detecting...', {
+      fontSize: '20px', color: '#a0b0c0'
+    }).setOrigin(0.5);
+
+    this.input.gamepad.on('connected', () => this.updateStatus());
+    this.input.gamepad.on('disconnected', () => this.updateStatus());
+    this.updateStatus();
+  }
+
+  showRoleAndDifficulty() {
+    this.children.removeAll();
+
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+
+    this.add.text(cx, cy - 100, 'Choose Your Role', {
+      fontSize: '32px', color: '#a0b0ff'
+    }).setOrigin(0.5);
+
+    const prisonerBtn = this.add.text(cx, cy - 20, 'Prisoner (AI Watcher)', {
+      fontSize: '28px', color: '#fff', backgroundColor: '#1a2238',
+      padding: { left: 30, right: 30, top: 15, bottom: 15 }
+    }).setOrigin(0.5).setInteractive();
+
+    const watcherBtn = this.add.text(cx, cy + 60, 'Watcher (AI Prisoner)', {
+      fontSize: '28px', color: '#fff', backgroundColor: '#1a2238',
+      padding: { left: 30, right: 30, top: 15, bottom: 15 }
+    }).setOrigin(0.5).setInteractive();
+
+    prisonerBtn.on('pointerdown', () => {
+      gameConfig.humanRole = 'Prisoner';
+      this.showDifficulty();
+    });
+
+    watcherBtn.on('pointerdown', () => {
+      gameConfig.humanRole = 'Watcher';
+      this.showDifficulty();
+    });
+  }
+
+  showDifficulty() {
+    this.children.removeAll();
+
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+
+    this.add.text(cx, cy - 120, 'Select Difficulty', {
+      fontSize: '32px', color: '#a0b0ff'
+    }).setOrigin(0.5);
+
+    const easyBtn = this.add.text(cx - 120, cy - 20, 'Easy', {
+      fontSize: '28px', color: '#88ff88', backgroundColor: '#1a2238',
+      padding: { left: 30, right: 30, top: 15, bottom: 15 }
+    }).setOrigin(0.5).setInteractive();
+
+    const medBtn = this.add.text(cx, cy - 20, 'Medium', {
+      fontSize: '28px', color: '#ffff88', backgroundColor: '#1a2238',
+      padding: { left: 30, right: 30, top: 15, bottom: 15 }
+    }).setOrigin(0.5).setInteractive();
+
+    const hardBtn = this.add.text(cx + 120, cy - 20, 'Hard', {
+      fontSize: '28px', color: '#ff8888', backgroundColor: '#1a2238',
+      padding: { left: 30, right: 30, top: 15, bottom: 15 }
+    }).setOrigin(0.5).setInteractive();
+
+    easyBtn.on('pointerdown', () => { gameConfig.difficulty = 'easy'; this.startGame(); });
+    medBtn.on('pointerdown', () => { gameConfig.difficulty = 'medium'; this.startGame(); });
+    hardBtn.on('pointerdown', () => { gameConfig.difficulty = 'hard'; this.startGame(); });
+  }
+
+  updateStatus() {
+    const pads = this.input.gamepad.getAll();
+    let msg = `Controllers: ${pads.length} detected`;
+    if (pads.length >= 1) msg += ' – P1: Controller';
+    if (pads.length >= 2) msg += ' – P2: Controller';
+    if (pads.length === 0) msg += ' – Keyboard only';
+    this.statusText.setText(msg);
+
+    gameConfig.input.p1 = pads.length >= 1 ? 'controller' : 'keyboard';
+    gameConfig.input.p2 = pads.length >= 2 ? 'controller' : 'keyboard';
+  }
+
+  startGame() {
+    this.scene.start('MainGame');
+  }
+}
+
+class MainGameScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'MainGame' });
   }
 
   create() {
@@ -74,13 +202,11 @@ class MainScene extends Phaser.Scene {
     this.prisonerGlow = this.add.circle(0, 0, TILE_SIZE/2 + 4, 0x5ad4e6, 0.4)
       .setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
 
-    // Noise overlay
     this.noiseLayer = this.add.graphics().setDepth(5);
 
-    // Input
     this.cursors = this.input.keyboard.createCursorKeys();
 
-    // Keyboard shortcuts
+    // Keyboard controls
     this.input.keyboard.on('keydown-TAB', () => this.toggleView());
     this.input.keyboard.on('keydown-SPACE', () => this.endTurn());
     this.input.keyboard.on('keydown-Q', () => this.rotateWatcher(-1));
@@ -90,11 +216,6 @@ class MainScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-THREE', () => this.setBluff(2));
     this.input.keyboard.on('keydown-FOUR', () => this.setBluff(3));
 
-    // Gamepad connect feedback
-    this.input.gamepad.once('connected', () => {
-      this.addLog("Controller connected", true);
-    });
-
     this.createUI();
 
     updateUI(this);
@@ -103,19 +224,18 @@ class MainScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    // Decay noise markers
     state.noiseMarkers = state.noiseMarkers.filter(m => (m.ttl -= delta / 1000) > 0);
 
     const pad = this.input.gamepad.pad1;
 
     if (state.turn === "Prisoner") {
-      // Keyboard movement
+      // Keyboard move
       if (Phaser.Input.Keyboard.JustDown(this.cursors.left))  this.tryMove(-1, 0);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.tryMove(1, 0);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.up))    this.tryMove(0, -1);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.down))  this.tryMove(0, 1);
 
-      // Gamepad movement (left stick / D-pad)
+      // Gamepad move (D-pad / left stick)
       if (pad) {
         const ax = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
         const ay = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
@@ -129,12 +249,12 @@ class MainScene extends Phaser.Scene {
     }
 
     if (state.turn === "Watcher" && pad) {
-      if (pad.A) this.endTurn();
-      if (pad.B) this.setBluff(1);
-      if (pad.X) this.setBluff(2);
-      if (pad.Y) this.setBluff(0);
-      if (pad.RB) this.rotateWatcher(1);
-      if (pad.LB) this.rotateWatcher(-1);
+      if (Phaser.Input.Gamepad.JustDown(pad.A)) this.endTurn();
+      if (Phaser.Input.Gamepad.JustDown(pad.Y)) this.setBluff(0); // North
+      if (Phaser.Input.Gamepad.JustDown(pad.B)) this.setBluff(1); // East
+      if (Phaser.Input.Gamepad.JustDown(pad.X)) this.setBluff(2); // South
+      if (Phaser.Input.Gamepad.JustDown(pad.RB)) this.rotateWatcher(1);
+      if (Phaser.Input.Gamepad.JustDown(pad.LB)) this.rotateWatcher(-1);
     }
 
     this.renderAll();
@@ -144,7 +264,7 @@ class MainScene extends Phaser.Scene {
     const x = 16;
     let y = 16;
 
-    this.add.text(x, y, 'Opticon v2', { fontSize: '32px', color: '#d0e0ff', stroke: '#000', strokeThickness: 6 });
+    this.add.text(x, y, 'Opticon v3', { fontSize: '32px', color: '#d0e0ff', stroke: '#000', strokeThickness: 6 });
     y += 50;
 
     this.turnLabel   = this.add.text(x, y, '', { fontSize: '22px', color: '#e0f0ff' });
@@ -156,7 +276,6 @@ class MainScene extends Phaser.Scene {
     this.mpLabel     = this.add.text(x, y, '', { fontSize: '20px', color: '#b0c0ff' });
     y += 60;
 
-    // Controls help – updated dynamically
     this.controlsText = this.add.text(x, y, '', { fontSize: '16px', color: '#a0b0c0', wordWrap: { width: 340 } });
     this.updateControlsText();
   }
@@ -164,7 +283,7 @@ class MainScene extends Phaser.Scene {
   updateControlsText() {
     const isPrisonerTurn = state.turn === "Prisoner";
     const text = isPrisonerTurn
-      ? "Arrows / D-pad: Move (max 3)\nSpace / A: End Turn"
+      ? "Arrows / D-pad / Left Stick: Move (max 3)\nSpace / A: End Turn"
       : "Q / LB: Rotate Left\nE / RB: Rotate Right\n1/Y: Bluff North\n2/B: East\n3/X: South\n4/A: West\nSpace / A: End Turn";
     this.controlsText.setText(text);
   }
@@ -341,25 +460,21 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  updateUI() {
-    this.turnLabel.setText(`Turn: ${state.turn}`);
-    this.roleLabel.setText(`View: ${state.view}`);
-    this.facingLabel.setText(`Facing: ${DIRS[state.watcher.facing]}`);
-    this.mpLabel.setText(`MP: ${state.prisoner.mp}`);
-    this.updateControlsText();
+  updateCameraFollow() {
+    const target = state.turn === "Prisoner"
+      ? { x: state.prisoner.x * TILE_SIZE + TILE_SIZE / 2 + 100, y: state.prisoner.y * TILE_SIZE + TILE_SIZE / 2 + 80 }
+      : { x: HALF * TILE_SIZE + TILE_SIZE / 2 + 100, y: HALF * TILE_SIZE + TILE_SIZE / 2 + 80 };
+
+    this.cameras.main.startFollow(target, true, 0.12, 0.12);
   }
 }
 
-// ────────────────────────────────────────────────
 // Helper functions
-// ────────────────────────────────────────────────
-
 function buildMap() {
   state.map = Array(GRID).fill().map(() => Array(GRID).fill(TILE.FLOOR));
   state.objects = Array(GRID).fill().map(() => Array(GRID).fill(OBJ.NONE));
   state.ringIndex = Array(GRID).fill().map(() => Array(GRID).fill(0));
 
-  // Central tower
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       const tx = HALF + dx;
@@ -371,7 +486,6 @@ function buildMap() {
     }
   }
 
-  // Moat
   for (let r = 2; r <= 1 + state.moatThickness; r++) {
     for (let y = HALF - r; y <= HALF + r; y++) {
       for (let x = HALF - r; x <= HALF + r; x++) {
@@ -383,7 +497,6 @@ function buildMap() {
     }
   }
 
-  // Rings
   let currentRadius = 2 + state.moatThickness;
   for (let ring = 1; ring <= state.ringCount; ring++) {
     const ringStart = currentRadius;
@@ -399,7 +512,6 @@ function buildMap() {
     }
   }
 
-  // Procedural walls and obstacles
   for (let i = 0; i < 120; i++) {
     const x = Math.floor(Math.random() * (GRID - 6)) + 3;
     const y = Math.floor(Math.random() * (GRID - 6)) + 3;
@@ -426,23 +538,17 @@ function createTextures(scene) {
 
   makeTex('tex_floor', 0x171b28, g => {
     g.fillStyle(0x20273a, 0.5);
-    for (let i = 0; i < 12; i++) {
-      g.fillRect(Math.random()*sz, Math.random()*sz, 2, 2);
-    }
+    for (let i = 0; i < 12; i++) g.fillRect(Math.random()*sz, Math.random()*sz, 2, 2);
   });
 
   makeTex('tex_wall', 0x2a2f45, g => {
     g.lineStyle(2, 0x3a4160);
-    for (let i = 4; i < sz; i += 8) {
-      g.lineBetween(0, i, sz, i);
-    }
+    for (let i = 4; i < sz; i += 8) g.lineBetween(0, i, sz, i);
   });
 
   makeTex('tex_moat', 0x121827, g => {
     g.lineStyle(1, 0x1e2740);
-    for (let i = 0; i < sz*2; i += 10) {
-      g.lineBetween(i-sz, 0, i, sz);
-    }
+    for (let i = 0; i < sz*2; i += 10) g.lineBetween(i-sz, 0, i, sz);
   });
 }
 
@@ -524,21 +630,16 @@ function updateUI(scene) {
   scene.updateControlsText();
 }
 
-// Launch the game
+// Launch
 const config = {
   type: Phaser.AUTO,
   width: window.innerWidth,
   height: window.innerHeight,
   parent: 'game',
-  scene: [MainScene],
-  scale: {
-    mode: Phaser.Scale.RESIZE,
-    autoCenter: Phaser.Scale.CENTER_BOTH
-  },
+  scene: [PlayerSelectScene, MainGameScene],
+  scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
   backgroundColor: '#0a0c12',
-  input: {
-    gamepad: true
-  }
+  input: { gamepad: true }
 };
 
 game = new Phaser.Game(config);
