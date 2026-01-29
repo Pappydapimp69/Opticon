@@ -1,28 +1,43 @@
-// Opticon v2 – Improved UI, Camera Follow, FOV-limited view
+// Opticon v2 – Core Game Logic with fixed UI, camera follow, FOV limit
 // Zane – January 2026
 
 const TILE_SIZE = 20;
 const GRID = 31;
 const HALF = Math.floor(GRID / 2);
 
-const TILE = { FLOOR: 0, WALL: 1, MOAT: 2 };
-const OBJ = { NONE: 0, GLASS: 1, DOOR: 2 };
-const DIRS = ["North", "East", "South", "West"];
+// Tile types
+const TILE = {
+  FLOOR: 0,
+  WALL: 1,
+  MOAT: 2
+};
 
+// Object types on floor
+const OBJ = {
+  NONE: 0,
+  GLASS: 1,   // noise on step
+  DOOR: 2     // noise + opens on step
+};
+
+const DIRS = ["North", "East", "South", "West"]; // 0=N, 1=E, 2=S, 3=W
+
+// Global state
 const state = {
-  map: [], objects: [], ringIndex: [],
-  tiles: [],
+  map: [],
+  objects: [],
+  ringIndex: [],          // 0 = invalid, -1 = tower/moat, 1–5 = playable rings
+  tiles: [],              // Phaser images
   prisoner: { x: HALF + 4, y: HALF + 6, mp: 3, startTurnPos: null },
   watcher: { facing: 0, bluffDir: null, hasRotated: false },
   turn: "Prisoner",
   view: "Prisoner",
-  noiseMarkers: [],
+  noiseMarkers: [],       // {x, y, ttl}
   ringCount: 5,
   ringThickness: 4,
   moatThickness: 3
 };
 
-let game;
+let game; // global Phaser.Game instance
 
 class MainScene extends Phaser.Scene {
   constructor() {
@@ -31,7 +46,7 @@ class MainScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor('#0a0c12');
-    this.cameras.main.setBounds(0, 0, GRID * TILE_SIZE, GRID * TILE_SIZE);
+    this.cameras.main.setBounds(0, 0, GRID * TILE_SIZE + 200, GRID * TILE_SIZE + 200);
 
     buildMap();
     state.prisoner.startTurnPos = { x: state.prisoner.x, y: state.prisoner.y };
@@ -65,7 +80,7 @@ class MainScene extends Phaser.Scene {
     // Input
     this.cursors = this.input.keyboard.createCursorKeys();
 
-    // Keyboard
+    // Keyboard shortcuts
     this.input.keyboard.on('keydown-TAB', () => this.toggleView());
     this.input.keyboard.on('keydown-SPACE', () => this.endTurn());
     this.input.keyboard.on('keydown-Q', () => this.rotateWatcher(-1));
@@ -75,7 +90,7 @@ class MainScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-THREE', () => this.setBluff(2));
     this.input.keyboard.on('keydown-FOUR', () => this.setBluff(3));
 
-    // Gamepad connect message
+    // Gamepad connect feedback
     this.input.gamepad.once('connected', () => {
       this.addLog("Controller connected", true);
     });
@@ -88,23 +103,28 @@ class MainScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    // Decay noise markers
     state.noiseMarkers = state.noiseMarkers.filter(m => (m.ttl -= delta / 1000) > 0);
 
     const pad = this.input.gamepad.pad1;
 
     if (state.turn === "Prisoner") {
-      // Keyboard move
+      // Keyboard movement
       if (Phaser.Input.Keyboard.JustDown(this.cursors.left))  this.tryMove(-1, 0);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.tryMove(1, 0);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.up))    this.tryMove(0, -1);
       if (Phaser.Input.Keyboard.JustDown(this.cursors.down))  this.tryMove(0, 1);
 
-      // Gamepad move (D-pad / left stick)
+      // Gamepad movement (left stick / D-pad)
       if (pad) {
         const ax = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
         const ay = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
-        if (Math.abs(ax) > 0.6) this.tryMove(ax > 0 ? 1 : -1, 0);
-        if (Math.abs(ay) > 0.6) this.tryMove(0, ay > 0 ? 1 : -1);
+        if (Math.abs(ax) > 0.6 || Math.abs(ay) > 0.6) {
+          if (ax < -0.6) this.tryMove(-1, 0);
+          if (ax > 0.6) this.tryMove(1, 0);
+          if (ay < -0.6) this.tryMove(0, -1);
+          if (ay > 0.6) this.tryMove(0, 1);
+        }
       }
     }
 
@@ -136,7 +156,7 @@ class MainScene extends Phaser.Scene {
     this.mpLabel     = this.add.text(x, y, '', { fontSize: '20px', color: '#b0c0ff' });
     y += 60;
 
-    // Controls help – shown always, but contextual
+    // Controls help – updated dynamically
     this.controlsText = this.add.text(x, y, '', { fontSize: '16px', color: '#a0b0c0', wordWrap: { width: 340 } });
     this.updateControlsText();
   }
@@ -164,12 +184,116 @@ class MainScene extends Phaser.Scene {
     this.cameras.main.startFollow(target, true, 0.12, 0.12);
   }
 
-  // Keep your existing tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, helpers
+  tryMove(dx, dy) {
+    if (state.turn !== "Prisoner" || state.prisoner.mp <= 0) return;
+    const nx = state.prisoner.x + dx;
+    const ny = state.prisoner.y + dy;
+    if (!isWalkable(nx, ny)) return;
+
+    let noise = false;
+    const obj = state.objects[ny][nx];
+    if (obj === OBJ.GLASS) {
+      noise = true;
+      this.addLog("Stepped on glass – noisy!");
+    } else if (obj === OBJ.DOOR) {
+      noise = true;
+      state.objects[ny][nx] = OBJ.NONE;
+      this.addLog("Door forced open – noisy!");
+    }
+
+    if (noise) addNoise(nx, ny);
+
+    state.prisoner.x = nx;
+    state.prisoner.y = ny;
+    state.prisoner.mp--;
+
+    if (getRing(nx, ny) === state.ringCount) {
+      this.addLog("*** PRISONER ESCAPES RING 5! ***");
+      this.resetGame("Prisoner");
+      return;
+    }
+
+    this.renderAll();
+    updateUI(this);
+    this.updateCameraFollow();
+  }
+
+  rotateWatcher(delta) {
+    if (state.turn !== "Watcher" || state.watcher.hasRotated) return;
+    state.watcher.facing = (state.watcher.facing + delta + 4) % 4;
+    state.watcher.hasRotated = true;
+    this.addLog(`Watcher rotated to ${DIRS[state.watcher.facing]}`);
+    updateUI(this);
+    this.renderAll();
+  }
+
+  setBluff(dir) {
+    if (state.turn !== "Watcher") return;
+    const facing = state.watcher.facing;
+    if (dir === facing || dir === opposite(facing)) return;
+    state.watcher.bluffDir = dir;
+    this.addLog(`Watcher bluffs ${DIRS[dir]}`);
+    updateUI(this);
+    this.renderAll();
+  }
+
+  endTurn() {
+    if (state.turn === "Prisoner") {
+      const moved = Math.abs(state.prisoner.x - state.prisoner.startTurnPos.x) +
+                    Math.abs(state.prisoner.y - state.prisoner.startTurnPos.y);
+      if (moved >= 2) {
+        addNoise(state.prisoner.startTurnPos.x, state.prisoner.startTurnPos.y);
+      }
+      state.turn = "Watcher";
+      state.prisoner.mp = 0;
+      state.watcher.hasRotated = false;
+      this.addLog("Turn: Watcher");
+      if (hasNoiseAt(state.prisoner.x, state.prisoner.y) &&
+          inWatcherFOV(state.watcher.facing, state.prisoner.x, state.prisoner.y)) {
+        this.addLog("*** WATCHER CAPTURES VIA NOISE! ***");
+        this.resetGame("Watcher");
+        return;
+      }
+    } else {
+      const q = getQuadrant(state.prisoner.x, state.prisoner.y);
+      if (q === state.watcher.facing || q === state.watcher.bluffDir) {
+        this.addLog("*** You feel like you're being watched. ***", true);
+      }
+      state.watcher.bluffDir = null;
+      state.turn = "Prisoner";
+      state.prisoner.mp = 3;
+      state.prisoner.startTurnPos = { x: state.prisoner.x, y: state.prisoner.y };
+      this.addLog("Turn: Prisoner");
+    }
+    updateUI(this);
+    this.renderAll();
+    this.updateCameraFollow();
+  }
+
+  resetGame(winner) {
+    this.addLog(`${winner.toUpperCase()} WINS! Resetting...`);
+    buildMap();
+    state.prisoner = { x: HALF + 4, y: HALF + 6, mp: 3, startTurnPos: null };
+    state.watcher = { facing: 0, bluffDir: null, hasRotated: false };
+    state.turn = "Prisoner";
+    state.view = "Prisoner";
+    state.noiseMarkers = [];
+    state.prisoner.startTurnPos = { x: state.prisoner.x, y: state.prisoner.y };
+    updateUI(this);
+    this.renderAll();
+    this.updateCameraFollow();
+  }
+
+  addLog(text, isAlert = false) {
+    const color = isAlert ? '#ff6b6b' : '#9ca3af';
+    const logText = this.add.text(20, this.scale.height - 200 - (this.children.list.filter(c => c.type === 'Text' && c.y > this.scale.height - 300).length * 22),
+      text, { fontSize: '16px', color, wordWrap: { width: 300 } });
+    this.time.delayedCall(12000, () => logText.destroy());
+  }
 
   renderAll() {
     const isPrisonerView = state.view === "Prisoner";
 
-    // Reset
     state.tiles.flat().forEach(t => {
       t.setAlpha(1);
       t.clearTint();
@@ -184,7 +308,6 @@ class MainScene extends Phaser.Scene {
       }
     }
 
-    // Gaze / bluff tint (only on visible tiles in prisoner view)
     const realTint = isPrisonerView ? 0x555577 : 0x88ff88;
     const bluffTint = isPrisonerView ? 0x555577 : 0x444422;
 
@@ -200,14 +323,12 @@ class MainScene extends Phaser.Scene {
       }
     }
 
-    // Prisoner marker & glow
     const { sx, sy } = screenFromGrid(state.prisoner.x, state.prisoner.y);
     this.prisonerMarker.setPosition(sx + TILE_SIZE/2, sy + TILE_SIZE/2)
       .setVisible(state.view === "Prisoner");
     this.prisonerGlow.setPosition(sx + TILE_SIZE/2, sy + TILE_SIZE/2)
       .setVisible(state.view === "Prisoner");
 
-    // Noise in watcher view
     this.noiseLayer.clear();
     if (state.view === "Watcher") {
       state.noiseMarkers.forEach(m => {
@@ -219,20 +340,205 @@ class MainScene extends Phaser.Scene {
       });
     }
   }
+
+  updateUI() {
+    this.turnLabel.setText(`Turn: ${state.turn}`);
+    this.roleLabel.setText(`View: ${state.view}`);
+    this.facingLabel.setText(`Facing: ${DIRS[state.watcher.facing]}`);
+    this.mpLabel.setText(`MP: ${state.prisoner.mp}`);
+    this.updateControlsText();
+  }
 }
 
-// Keep all your helper functions here (buildMap, createTextures, screenFromGrid, etc.)
+// ────────────────────────────────────────────────
+// Helper functions
+// ────────────────────────────────────────────────
 
-// Launch
+function buildMap() {
+  state.map = Array(GRID).fill().map(() => Array(GRID).fill(TILE.FLOOR));
+  state.objects = Array(GRID).fill().map(() => Array(GRID).fill(OBJ.NONE));
+  state.ringIndex = Array(GRID).fill().map(() => Array(GRID).fill(0));
+
+  // Central tower
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const tx = HALF + dx;
+      const ty = HALF + dy;
+      if (inBounds(tx, ty)) {
+        state.map[ty][tx] = TILE.WALL;
+        state.ringIndex[ty][tx] = -1;
+      }
+    }
+  }
+
+  // Moat
+  for (let r = 2; r <= 1 + state.moatThickness; r++) {
+    for (let y = HALF - r; y <= HALF + r; y++) {
+      for (let x = HALF - r; x <= HALF + r; x++) {
+        if (Math.max(Math.abs(x - HALF), Math.abs(y - HALF)) === r && inBounds(x, y)) {
+          state.map[y][x] = TILE.MOAT;
+          state.ringIndex[y][x] = -1;
+        }
+      }
+    }
+  }
+
+  // Rings
+  let currentRadius = 2 + state.moatThickness;
+  for (let ring = 1; ring <= state.ringCount; ring++) {
+    const ringStart = currentRadius;
+    currentRadius += state.ringThickness;
+    for (let r = ringStart; r < currentRadius; r++) {
+      for (let y = HALF - r; y <= HALF + r; y++) {
+        for (let x = HALF - r; x <= HALF + r; x++) {
+          if (Math.max(Math.abs(x - HALF), Math.abs(y - HALF)) === r && inBounds(x, y)) {
+            state.ringIndex[y][x] = ring;
+          }
+        }
+      }
+    }
+  }
+
+  // Procedural walls and obstacles
+  for (let i = 0; i < 120; i++) {
+    const x = Math.floor(Math.random() * (GRID - 6)) + 3;
+    const y = Math.floor(Math.random() * (GRID - 6)) + 3;
+    if (state.ringIndex[y][x] > 0 && state.map[y][x] === TILE.FLOOR) {
+      if (Math.random() < 0.30) state.map[y][x] = TILE.WALL;
+      if (Math.random() < 0.18) {
+        state.objects[y][x] = Math.random() < 0.5 ? OBJ.GLASS : OBJ.DOOR;
+      }
+    }
+  }
+}
+
+function createTextures(scene) {
+  const sz = TILE_SIZE - 1;
+
+  const makeTex = (key, color, extra) => {
+    const g = scene.add.graphics();
+    g.fillStyle(color);
+    g.fillRect(0, 0, sz, sz);
+    if (extra) extra(g);
+    g.generateTexture(key, sz, sz);
+    g.destroy();
+  };
+
+  makeTex('tex_floor', 0x171b28, g => {
+    g.fillStyle(0x20273a, 0.5);
+    for (let i = 0; i < 12; i++) {
+      g.fillRect(Math.random()*sz, Math.random()*sz, 2, 2);
+    }
+  });
+
+  makeTex('tex_wall', 0x2a2f45, g => {
+    g.lineStyle(2, 0x3a4160);
+    for (let i = 4; i < sz; i += 8) {
+      g.lineBetween(0, i, sz, i);
+    }
+  });
+
+  makeTex('tex_moat', 0x121827, g => {
+    g.lineStyle(1, 0x1e2740);
+    for (let i = 0; i < sz*2; i += 10) {
+      g.lineBetween(i-sz, 0, i, sz);
+    }
+  });
+}
+
+function screenFromGrid(x, y) {
+  return { sx: 100 + x * TILE_SIZE, sy: 80 + y * TILE_SIZE };
+}
+
+function inBounds(x, y) {
+  return x >= 0 && x < GRID && y >= 0 && y < GRID;
+}
+
+function isWalkable(x, y) {
+  if (!inBounds(x, y)) return false;
+  return state.map[y][x] === TILE.FLOOR;
+}
+
+function inWatcherFOV(dir, x, y) {
+  const dx = x - HALF;
+  const dy = y - HALF;
+  switch (dir) {
+    case 0: return dy <= 0 && Math.abs(dx) <= -dy;
+    case 1: return dx >= 0 && Math.abs(dy) <= dx;
+    case 2: return dy >= 0 && Math.abs(dx) <= dy;
+    case 3: return dx <= 0 && Math.abs(dy) <= -dx;
+    default: return false;
+  }
+}
+
+function getQuadrant(x, y) {
+  for (let d = 0; d < 4; d++) {
+    if (inWatcherFOV(d, x, y)) return d;
+  }
+  return -1;
+}
+
+function opposite(dir) {
+  return (dir + 2) % 4;
+}
+
+function getRing(x, y) {
+  return inBounds(x, y) ? state.ringIndex[y][x] : 0;
+}
+
+function hasNoiseAt(x, y) {
+  return state.noiseMarkers.some(m => m.x === x && m.y === y && m.ttl > 0);
+}
+
+function addNoise(x, y) {
+  state.noiseMarkers.push({ x, y, ttl: 4 });
+}
+
+function computePrisonerFOV() {
+  const vis = Array(GRID).fill().map(() => Array(GRID).fill(false));
+  const { x, y } = state.prisoner;
+  vis[y][x] = true;
+
+  const dirs = [{dx:0,dy:-1}, {dx:1,dy:0}, {dx:0,dy:1}, {dx:-1,dy:0}];
+  dirs.forEach(d => {
+    let cx = x, cy = y;
+    for (let step = 0; step < 5; step++) {
+      cx += d.dx; cy += d.dy;
+      if (!inBounds(cx, cy)) break;
+      vis[cy][cx] = true;
+      if (state.map[cy][cx] !== TILE.FLOOR) break;
+    }
+  });
+  return vis;
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function updateUI(scene) {
+  scene.turnLabel.setText(`Turn: ${state.turn}`);
+  scene.roleLabel.setText(`View: ${state.view}`);
+  scene.facingLabel.setText(`Facing: ${DIRS[state.watcher.facing]}`);
+  scene.mpLabel.setText(`MP: ${state.prisoner.mp}`);
+  scene.updateControlsText();
+}
+
+// Launch the game
 const config = {
   type: Phaser.AUTO,
   width: window.innerWidth,
   height: window.innerHeight,
   parent: 'game',
   scene: [MainScene],
-  scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH
+  },
   backgroundColor: '#0a0c12',
-  input: { gamepad: true }
+  input: {
+    gamepad: true
+  }
 };
 
 game = new Phaser.Game(config);
