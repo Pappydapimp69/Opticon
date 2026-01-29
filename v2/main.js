@@ -1,11 +1,10 @@
-// Opticon v3 – Horizontal Split Player Select + Instant Audio + Controller Navigation
-// Zane – January 2026
+// main.js - Fixed: Native gamepad polling + horizontal split select + instant audio
+// No Phaser gamepad wrapper, direct navigator.getGamepads() detection
 
 const TILE_SIZE = 20;
 const GRID = 31;
 const HALF = Math.floor(GRID / 2);
 
-// Tile types
 const TILE = { FLOOR: 0, WALL: 1, MOAT: 2 };
 const OBJ = { NONE: 0, GLASS: 1, DOOR: 2 };
 const DIRS = ["North", "East", "South", "West"];
@@ -43,50 +42,34 @@ class PlayerSelectScene extends Phaser.Scene {
     const cy = h / 2;
 
     this.add.rectangle(0, 0, w, h, 0x0a0c12).setOrigin(0);
-
-    // Split line
     this.add.line(cx, 0, 0, 0, 0, h, 0x334466, 0.5).setOrigin(0);
 
-    // Left: Prisoner side
+    // Prisoner left
     this.add.rectangle(0, 0, cx, h, 0x112244, 0.7).setOrigin(0);
-    this.add.text(cx / 2, cy - 100, 'PRISONER', {
-      fontSize: '52px', color: '#88ccff', stroke: '#000', strokeThickness: 10
-    }).setOrigin(0.5);
-    const prisonerArea = this.add.rectangle(cx / 2, cy, cx - 40, h - 100, 0x224466, 0)
-      .setOrigin(0.5)
-      .setInteractive();
+    this.add.text(cx / 2, cy - 100, 'PRISONER', { fontSize: '52px', color: '#88ccff', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5);
+    const prisonerArea = this.add.rectangle(cx / 2, cy, cx - 40, h - 100, 0x224466, 0).setOrigin(0.5).setInteractive();
+    this.add.text(cx / 2, cy + 20, 'Human as Prisoner\n(AI Watcher)', { fontSize: '28px', color: '#d0e0ff', align: 'center' }).setOrigin(0.5);
 
-    this.add.text(cx / 2, cy + 20, 'Human as Prisoner\n(AI controls Watcher)', {
-      fontSize: '28px', color: '#d0e0ff', align: 'center'
-    }).setOrigin(0.5);
-
-    // Right: Watcher side
+    // Watcher right
     this.add.rectangle(cx, 0, cx, h, 0x220011, 0.7).setOrigin(0);
-    this.add.text(cx + cx / 2, cy - 100, 'WATCHER', {
-      fontSize: '52px', color: '#ff8888', stroke: '#000', strokeThickness: 10
-    }).setOrigin(0.5);
-    const watcherArea = this.add.rectangle(cx + cx / 2, cy, cx - 40, h - 100, 0x441122, 0)
-      .setOrigin(0.5)
-      .setInteractive();
+    this.add.text(cx + cx / 2, cy - 100, 'WATCHER', { fontSize: '52px', color: '#ff8888', stroke: '#000', strokeThickness: 10 }).setOrigin(0.5);
+    const watcherArea = this.add.rectangle(cx + cx / 2, cy, cx - 40, h - 100, 0x441122, 0).setOrigin(0.5).setInteractive();
+    this.add.text(cx + cx / 2, cy + 20, 'Human as Watcher\n(AI Prisoner)', { fontSize: '28px', color: '#ffd0d0', align: 'center' }).setOrigin(0.5);
 
-    this.add.text(cx + cx / 2, cy + 20, 'Human as Watcher\n(AI controls Prisoner)', {
-      fontSize: '28px', color: '#ffd0d0', align: 'center'
-    }).setOrigin(0.5);
-
-    // 2-player button (bottom center)
-    const twoArea = this.add.rectangle(cx, h - 100, 400, 120, 0x1a2238, 0.9)
-      .setOrigin(0.5)
-      .setInteractive();
-    this.add.text(cx, h - 100, '2 Players (Hotseat)', {
-      fontSize: '32px', color: '#e0e0ff'
-    }).setOrigin(0.5);
+    // 2-player bottom
+    const twoArea = this.add.rectangle(cx, h - 100, 400, 120, 0x1a2238, 0.9).setOrigin(0.5).setInteractive();
+    this.add.text(cx, h - 100, '2 Players (Hotseat)', { fontSize: '32px', color: '#e0e0ff' }).setOrigin(0.5);
 
     // Status
-    this.statusText = this.add.text(cx, h - 200, 'Detecting controllers...', {
-      fontSize: '22px', color: '#a0b0c0'
-    }).setOrigin(0.5);
+    this.statusText = this.add.text(cx, h - 200, 'Detecting controllers...', { fontSize: '22px', color: '#a0b0c0' }).setOrigin(0.5);
 
-    // Controller navigation
+    // Poll gamepads immediately and every 100ms
+    this.updateGamepadStatus();
+    this.time.addEvent({ delay: 100, callback: this.updateGamepadStatus, callbackScope: this, loop: true });
+
+    // Instant audio
+    this.playIntroMusic();
+
     prisonerArea.on('pointerdown', () => {
       gameConfig.humans = 1;
       gameConfig.humanRole = 'Prisoner';
@@ -103,52 +86,21 @@ class PlayerSelectScene extends Phaser.Scene {
       gameConfig.humans = 2;
       this.startGame();
     });
-
-    // Instant audio
-    this.playIntroMusic();
-
-    // Gamepad detection on start
-    this.input.gamepad.on('connected', () => this.updateStatus());
-    this.input.gamepad.on('disconnected', () => this.updateStatus());
-    this.updateStatus();
   }
 
-  update(time, delta) {
-    const pad = this.input.gamepad.pad1;
-    if (pad) {
-      const ay = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
+  updateGamepadStatus() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let count = 0;
+    for (let pad of pads) if (pad) count++;
 
-      if (ay < -0.6) {
-        // Highlight left (Prisoner)
-        this.playSound('menu_move');
-      }
-      if (ay > 0.6) {
-        // Highlight right (Watcher)
-        this.playSound('menu_move');
-      }
-
-      if (Phaser.Input.Gamepad.JustDown(pad.A)) {
-        this.playSound('menu_confirm');
-        // Simulate click on selected side (simple: assume last highlighted or center)
-        if (Math.random() > 0.5) {
-          gameConfig.humans = 1;
-          gameConfig.humanRole = 'Prisoner';
-        } else {
-          gameConfig.humans = 1;
-          gameConfig.humanRole = 'Watcher';
-        }
-        this.startGame();
-      }
-    }
-  }
-
-  updateStatus() {
-    const pads = this.input.gamepad.getAll();
-    let msg = `Controllers: ${pads.length} detected`;
-    if (pads.length >= 1) msg += ' – P1: Controller';
-    if (pads.length >= 2) msg += ' – P2: Controller';
-    if (pads.length === 0) msg += ' – Keyboard only';
+    let msg = `Controllers: ${count} detected`;
+    if (count >= 1) msg += ' – P1 ready';
+    if (count >= 2) msg += ' – P2 ready';
+    if (count === 0) msg += ' – Keyboard only';
     this.statusText.setText(msg);
+
+    gameConfig.input.p1 = count >= 1 ? 'controller' : 'keyboard';
+    gameConfig.input.p2 = count >= 2 ? 'controller' : 'keyboard';
   }
 
   playIntroMusic() {
@@ -163,18 +115,6 @@ class PlayerSelectScene extends Phaser.Scene {
     gain.connect(this.sound.context.destination);
     osc.start();
     osc.stop(this.sound.context.currentTime + 15);
-  }
-
-  playSound(type) {
-    const osc = this.sound.context.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = type === 'menu_move' ? 600 : 900;
-    const gain = this.sound.context.createGain();
-    gain.gain.value = 0.1;
-    osc.connect(gain);
-    gain.connect(this.sound.context.destination);
-    osc.start();
-    osc.stop(this.sound.context.currentTime + 0.08);
   }
 
   startGame() {
@@ -235,36 +175,36 @@ class MainGameScene extends Phaser.Scene {
     this.playSound('turn_start');
   }
 
-  createModernUI() {
-    // Top bar
-    this.topBar = this.add.rectangle(0, 0, this.scale.width, 80, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
-
-    this.turnText = this.add.text(20, 20, '', { fontSize: '26px', color: '#e0f0ff' }).setScrollFactor(0);
-    this.mpText = this.add.text(this.scale.width / 2 - 80, 20, '', { fontSize: '26px', color: '#88ff88' }).setScrollFactor(0);
-    this.facingText = this.add.text(this.scale.width - 220, 20, '', { fontSize: '22px', color: '#b0c0ff' }).setScrollFactor(0);
-
-    // Bottom bar
-    this.bottomBar = this.add.rectangle(0, this.scale.height - 140, this.scale.width, 140, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
-
-    this.controlsText = this.add.text(20, this.scale.height - 120, '', {
-      fontSize: '18px', color: '#a0b0c0', wordWrap: { width: this.scale.width - 40 }
-    }).setScrollFactor(0);
-
-    // End turn hold meter
-    this.endMeterBG = this.add.rectangle(this.scale.width / 2, this.scale.height - 60, 340, 40, 0x333333).setScrollFactor(0);
-    this.endMeterFill = this.add.rectangle(this.scale.width / 2 - 170, this.scale.height - 60, 0, 40, 0x00ff88).setOrigin(0, 0.5).setScrollFactor(0);
-    this.endMeterText = this.add.text(this.scale.width / 2, this.scale.height - 60, 'Hold A / Space to End Turn', {
-      fontSize: '18px', color: '#ffffff'
-    }).setOrigin(0.5).setScrollFactor(0);
-  }
-
   update(time, delta) {
-    // ... (noise decay, movement, watcher gamepad – same as before)
+    state.noiseMarkers = state.noiseMarkers.filter(m => (m.ttl -= delta / 1000) > 0);
 
-    const pad = this.input.gamepad.pad1;
+    // Raw native gamepad polling - P1 = first pad
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = pads[0];
 
-    // Hold A / Space to end turn
-    const isHolding = (pad && pad.A) || this.input.keyboard.addKey('SPACE').isDown;
+    if (state.turn === "Prisoner" && pad) {
+      const ax = pad.axes[0] || 0;
+      const ay = pad.axes[1] || 0;
+
+      if (Math.abs(ax) > 0.6 || Math.abs(ay) > 0.6) {
+        if (ax < -0.6) this.tryMove(-1, 0);
+        if (ax > 0.6) this.tryMove(1, 0);
+        if (ay < -0.6) this.tryMove(0, -1);
+        if (ay > 0.6) this.tryMove(0, 1);
+      }
+    }
+
+    if (state.turn === "Watcher" && pad) {
+      if (pad.buttons[0].pressed) this.endTurn();     // A
+      if (pad.buttons[3].pressed) this.setBluff(0);   // Y North
+      if (pad.buttons[1].pressed) this.setBluff(1);   // B East
+      if (pad.buttons[2].pressed) this.setBluff(2);   // X South
+      if (pad.buttons[5].pressed) this.rotateWatcher(1); // RB right
+      if (pad.buttons[4].pressed) this.rotateWatcher(-1); // LB left
+    }
+
+    // Hold A or Space to end turn
+    const isHolding = (pad && pad.buttons[0].pressed) || this.input.keyboard.addKey('SPACE').isDown;
     if (isHolding) {
       state.endHoldProgress += delta / 3000;
       if (state.endHoldProgress >= 1) {
@@ -276,16 +216,48 @@ class MainGameScene extends Phaser.Scene {
       state.endHoldProgress = 0;
     }
 
+    this.renderAll();
+  }
+
+  createModernUI() {
+    this.topBar = this.add.rectangle(0, 0, this.scale.width, 80, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
+
+    this.turnText = this.add.text(20, 20, '', { fontSize: '26px', color: '#e0f0ff' }).setScrollFactor(0);
+    this.mpText = this.add.text(this.scale.width / 2 - 80, 20, '', { fontSize: '26px', color: '#88ff88' }).setScrollFactor(0);
+    this.facingText = this.add.text(this.scale.width - 220, 20, '', { fontSize: '22px', color: '#b0c0ff' }).setScrollFactor(0);
+
+    this.bottomBar = this.add.rectangle(0, this.scale.height - 140, this.scale.width, 140, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
+
+    this.controlsText = this.add.text(20, this.scale.height - 120, '', {
+      fontSize: '18px', color: '#a0b0c0', wordWrap: { width: this.scale.width - 40 }
+    }).setScrollFactor(0);
+
+    this.endMeterBG = this.add.rectangle(this.scale.width / 2, this.scale.height - 60, 340, 40, 0x333333).setScrollFactor(0);
+    this.endMeterFill = this.add.rectangle(this.scale.width / 2 - 170, this.scale.height - 60, 0, 40, 0x00ff88).setOrigin(0, 0.5).setScrollFactor(0);
+    this.endMeterText = this.add.text(this.scale.width / 2, this.scale.height - 60, 'Hold A / Space to End Turn', {
+      fontSize: '18px', color: '#ffffff'
+    }).setOrigin(0.5).setScrollFactor(0);
+  }
+
+  updateUI() {
+    this.turnText.setText(`Turn: ${state.turn}`);
+    this.mpText.setText(`MP: ${state.prisoner.mp}`);
+    this.facingText.setText(`Facing: ${DIRS[state.watcher.facing]}`);
+
+    const isPrisonerTurn = state.turn === "Prisoner";
+    this.controlsText.setText(isPrisonerTurn
+      ? "Arrows / D-pad / Left Stick: Move (max 3)\nHold A / Space 3s: End Turn"
+      : "Q / LB: Rotate Left    E / RB: Rotate Right\n1/Y: Bluff North    2/B: East    3/X: South\nHold A / Space 3s: End Turn"
+    );
+
     const width = 340 * state.endHoldProgress;
     this.endMeterFill.width = width;
     this.endMeterFill.fillColor = state.endHoldProgress > 0.8 ? 0xff4444 : 0x00ff88;
-
-    this.renderAll();
   }
 
   playSound(type) {
     const osc = this.sound.context.createOscillator();
-    osc.type = type === 'turn_start' ? 'sine' : 'sawtooth';
+    osc.type = 'sine';
     osc.frequency.value = type === 'turn_start' ? 180 : type === 'turn_end' ? 120 : 700;
     const gain = this.sound.context.createGain();
     gain.gain.value = type === 'turn_start' ? 0.15 : 0.12;
@@ -295,10 +267,8 @@ class MainGameScene extends Phaser.Scene {
     osc.stop(this.sound.context.currentTime + (type === 'turn_start' ? 1.2 : 0.18));
   }
 
-  // ... (keep tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, updateUI, helpers from your working version)
+  // ... (keep tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, helpers)
 }
-
-// Helper functions (buildMap, createTextures, screenFromGrid, inBounds, isWalkable, inWatcherFOV, getQuadrant, opposite, getRing, hasNoiseAt, addNoise, computePrisonerFOV, clamp, updateUI)
 
 const config = {
   type: Phaser.AUTO,
