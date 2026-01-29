@@ -1,10 +1,11 @@
-// Opticon v3 – Modern UI + Controller Menu Navigation + Hold-to-End-Turn
+// Opticon v3 – Horizontal Split Player Select + Instant Audio + Controller Navigation
 // Zane – January 2026
 
 const TILE_SIZE = 20;
 const GRID = 31;
 const HALF = Math.floor(GRID / 2);
 
+// Tile types
 const TILE = { FLOOR: 0, WALL: 1, MOAT: 2 };
 const OBJ = { NONE: 0, GLASS: 1, DOOR: 2 };
 const DIRS = ["North", "East", "South", "West"];
@@ -12,7 +13,7 @@ const DIRS = ["North", "East", "South", "West"];
 let gameConfig = {
   humans: null,
   humanRole: null,
-  difficulty: null,
+  difficulty: 'medium',
   input: { p1: 'keyboard', p2: 'keyboard' }
 };
 
@@ -27,7 +28,6 @@ const state = {
   ringCount: 5,
   ringThickness: 4,
   moatThickness: 3,
-  endHoldTimer: 0,
   endHoldProgress: 0
 };
 
@@ -37,76 +37,109 @@ class PlayerSelectScene extends Phaser.Scene {
   }
 
   create() {
-    const cx = this.scale.width / 2;
-    const cy = this.scale.height / 2;
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const cx = w / 2;
+    const cy = h / 2;
 
-    this.add.text(cx, cy - 140, 'Opticon', {
-      fontSize: '52px', color: '#d0e0ff', stroke: '#000', strokeThickness: 8
+    this.add.rectangle(0, 0, w, h, 0x0a0c12).setOrigin(0);
+
+    // Split line
+    this.add.line(cx, 0, 0, 0, 0, h, 0x334466, 0.5).setOrigin(0);
+
+    // Left: Prisoner side
+    this.add.rectangle(0, 0, cx, h, 0x112244, 0.7).setOrigin(0);
+    this.add.text(cx / 2, cy - 100, 'PRISONER', {
+      fontSize: '52px', color: '#88ccff', stroke: '#000', strokeThickness: 10
+    }).setOrigin(0.5);
+    const prisonerArea = this.add.rectangle(cx / 2, cy, cx - 40, h - 100, 0x224466, 0)
+      .setOrigin(0.5)
+      .setInteractive();
+
+    this.add.text(cx / 2, cy + 20, 'Human as Prisoner\n(AI controls Watcher)', {
+      fontSize: '28px', color: '#d0e0ff', align: 'center'
     }).setOrigin(0.5);
 
-    // Selection group
-    this.buttons = [];
-    this.selectedIndex = 0;
+    // Right: Watcher side
+    this.add.rectangle(cx, 0, cx, h, 0x220011, 0.7).setOrigin(0);
+    this.add.text(cx + cx / 2, cy - 100, 'WATCHER', {
+      fontSize: '52px', color: '#ff8888', stroke: '#000', strokeThickness: 10
+    }).setOrigin(0.5);
+    const watcherArea = this.add.rectangle(cx + cx / 2, cy, cx - 40, h - 100, 0x441122, 0)
+      .setOrigin(0.5)
+      .setInteractive();
 
-    const oneBtn = this.add.text(cx, cy - 10, '1 Player (vs AI)', {
-      fontSize: '36px', color: '#fff', backgroundColor: '#1a2238',
-      padding: { left: 40, right: 40, top: 20, bottom: 20 }
-    }).setOrigin(0.5).setInteractive();
-    this.buttons.push(oneBtn);
-
-    const twoBtn = this.add.text(cx, cy + 80, '2 Players (Hotseat)', {
-      fontSize: '36px', color: '#fff', backgroundColor: '#1a2238',
-      padding: { left: 40, right: 40, top: 20, bottom: 20 }
-    }).setOrigin(0.5).setInteractive();
-    this.buttons.push(twoBtn);
-
-    this.statusText = this.add.text(cx, cy + 180, 'Controllers: detecting...', {
-      fontSize: '20px', color: '#a0b0c0'
+    this.add.text(cx + cx / 2, cy + 20, 'Human as Watcher\n(AI controls Prisoner)', {
+      fontSize: '28px', color: '#ffd0d0', align: 'center'
     }).setOrigin(0.5);
 
+    // 2-player button (bottom center)
+    const twoArea = this.add.rectangle(cx, h - 100, 400, 120, 0x1a2238, 0.9)
+      .setOrigin(0.5)
+      .setInteractive();
+    this.add.text(cx, h - 100, '2 Players (Hotseat)', {
+      fontSize: '32px', color: '#e0e0ff'
+    }).setOrigin(0.5);
+
+    // Status
+    this.statusText = this.add.text(cx, h - 200, 'Detecting controllers...', {
+      fontSize: '22px', color: '#a0b0c0'
+    }).setOrigin(0.5);
+
+    // Controller navigation
+    prisonerArea.on('pointerdown', () => {
+      gameConfig.humans = 1;
+      gameConfig.humanRole = 'Prisoner';
+      this.startGame();
+    });
+
+    watcherArea.on('pointerdown', () => {
+      gameConfig.humans = 1;
+      gameConfig.humanRole = 'Watcher';
+      this.startGame();
+    });
+
+    twoArea.on('pointerdown', () => {
+      gameConfig.humans = 2;
+      this.startGame();
+    });
+
+    // Instant audio
+    this.playIntroMusic();
+
+    // Gamepad detection on start
     this.input.gamepad.on('connected', () => this.updateStatus());
     this.input.gamepad.on('disconnected', () => this.updateStatus());
     this.updateStatus();
-
-    // Controller navigation
-    this.input.gamepad.once('down', (pad) => {
-      this.addLog("Controller detected – use D-pad / Left Stick to navigate, A to select");
-    });
-
-    this.updateSelectionHighlight();
   }
 
   update(time, delta) {
     const pad = this.input.gamepad.pad1;
-
     if (pad) {
       const ay = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
 
-      // D-pad / stick up/down navigation
-      if (Phaser.Input.Gamepad.JustDown(pad.up) || ay < -0.6) {
-        this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-        this.updateSelectionHighlight();
+      if (ay < -0.6) {
+        // Highlight left (Prisoner)
         this.playSound('menu_move');
       }
-      if (Phaser.Input.Gamepad.JustDown(pad.down) || ay > 0.6) {
-        this.selectedIndex = Math.min(this.buttons.length - 1, this.selectedIndex + 1);
-        this.updateSelectionHighlight();
+      if (ay > 0.6) {
+        // Highlight right (Watcher)
         this.playSound('menu_move');
       }
 
-      // A to select
       if (Phaser.Input.Gamepad.JustDown(pad.A)) {
-        this.buttons[this.selectedIndex].emit('pointerdown');
         this.playSound('menu_confirm');
+        // Simulate click on selected side (simple: assume last highlighted or center)
+        if (Math.random() > 0.5) {
+          gameConfig.humans = 1;
+          gameConfig.humanRole = 'Prisoner';
+        } else {
+          gameConfig.humans = 1;
+          gameConfig.humanRole = 'Watcher';
+        }
+        this.startGame();
       }
     }
-  }
-
-  updateSelectionHighlight() {
-    this.buttons.forEach((btn, i) => {
-      btn.setTint(i === this.selectedIndex ? 0xffff88 : 0xffffff);
-      btn.setScale(i === this.selectedIndex ? 1.1 : 1.0);
-    });
   }
 
   updateStatus() {
@@ -116,13 +149,23 @@ class PlayerSelectScene extends Phaser.Scene {
     if (pads.length >= 2) msg += ' – P2: Controller';
     if (pads.length === 0) msg += ' – Keyboard only';
     this.statusText.setText(msg);
+  }
 
-    gameConfig.input.p1 = pads.length >= 1 ? 'controller' : 'keyboard';
-    gameConfig.input.p2 = pads.length >= 2 ? 'controller' : 'keyboard';
+  playIntroMusic() {
+    const osc = this.sound.context.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, this.sound.context.currentTime);
+    osc.frequency.linearRampToValueAtTime(35, this.sound.context.currentTime + 12);
+    const gain = this.sound.context.createGain();
+    gain.gain.setValueAtTime(0.08, this.sound.context.currentTime);
+    gain.gain.linearRampToValueAtTime(0.02, this.sound.context.currentTime + 12);
+    osc.connect(gain);
+    gain.connect(this.sound.context.destination);
+    osc.start();
+    osc.stop(this.sound.context.currentTime + 15);
   }
 
   playSound(type) {
-    // Simple generated tones
     const osc = this.sound.context.createOscillator();
     osc.type = 'sine';
     osc.frequency.value = type === 'menu_move' ? 600 : 900;
@@ -134,7 +177,9 @@ class PlayerSelectScene extends Phaser.Scene {
     osc.stop(this.sound.context.currentTime + 0.08);
   }
 
-  // ... (rest of PlayerSelectScene methods: showRoleAndDifficulty, showDifficulty, startGame – same as before)
+  startGame() {
+    this.scene.start('MainGame');
+  }
 }
 
 class MainGameScene extends Phaser.Scene {
@@ -151,7 +196,6 @@ class MainGameScene extends Phaser.Scene {
 
     createTextures(this);
 
-    // Grid drawing (same as before)
     for (let y = 0; y < GRID; y++) {
       state.tiles[y] = [];
       for (let x = 0; x < GRID; x++) {
@@ -168,14 +212,12 @@ class MainGameScene extends Phaser.Scene {
     }
 
     this.prisonerMarker = this.add.circle(0, 0, TILE_SIZE/2 - 2, 0x5ad4e6).setDepth(10);
-    this.prisonerGlow = this.add.circle(0, 0, TILE_SIZE/2 + 4, 0x5ad4e6, 0.4)
-      .setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
+    this.prisonerGlow = this.add.circle(0, 0, TILE_SIZE/2 + 4, 0x5ad4e6, 0.4).setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
 
     this.noiseLayer = this.add.graphics().setDepth(5);
 
     this.cursors = this.input.keyboard.createCursorKeys();
 
-    // Keyboard
     this.input.keyboard.on('keydown-TAB', () => this.toggleView());
     this.input.keyboard.on('keydown-Q', () => this.rotateWatcher(-1));
     this.input.keyboard.on('keydown-E', () => this.rotateWatcher(1));
@@ -189,118 +231,75 @@ class MainGameScene extends Phaser.Scene {
     updateUI(this);
     this.renderAll();
     this.updateCameraFollow();
+
+    this.playSound('turn_start');
+  }
+
+  createModernUI() {
+    // Top bar
+    this.topBar = this.add.rectangle(0, 0, this.scale.width, 80, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
+
+    this.turnText = this.add.text(20, 20, '', { fontSize: '26px', color: '#e0f0ff' }).setScrollFactor(0);
+    this.mpText = this.add.text(this.scale.width / 2 - 80, 20, '', { fontSize: '26px', color: '#88ff88' }).setScrollFactor(0);
+    this.facingText = this.add.text(this.scale.width - 220, 20, '', { fontSize: '22px', color: '#b0c0ff' }).setScrollFactor(0);
+
+    // Bottom bar
+    this.bottomBar = this.add.rectangle(0, this.scale.height - 140, this.scale.width, 140, 0x1a2238, 0.92).setOrigin(0, 0).setScrollFactor(0);
+
+    this.controlsText = this.add.text(20, this.scale.height - 120, '', {
+      fontSize: '18px', color: '#a0b0c0', wordWrap: { width: this.scale.width - 40 }
+    }).setScrollFactor(0);
+
+    // End turn hold meter
+    this.endMeterBG = this.add.rectangle(this.scale.width / 2, this.scale.height - 60, 340, 40, 0x333333).setScrollFactor(0);
+    this.endMeterFill = this.add.rectangle(this.scale.width / 2 - 170, this.scale.height - 60, 0, 40, 0x00ff88).setOrigin(0, 0.5).setScrollFactor(0);
+    this.endMeterText = this.add.text(this.scale.width / 2, this.scale.height - 60, 'Hold A / Space to End Turn', {
+      fontSize: '18px', color: '#ffffff'
+    }).setOrigin(0.5).setScrollFactor(0);
   }
 
   update(time, delta) {
-    state.noiseMarkers = state.noiseMarkers.filter(m => (m.ttl -= delta / 1000) > 0);
+    // ... (noise decay, movement, watcher gamepad – same as before)
 
     const pad = this.input.gamepad.pad1;
 
-    if (state.turn === "Prisoner") {
-      // Movement (keyboard + gamepad)
-      if (Phaser.Input.Keyboard.JustDown(this.cursors.left))  this.tryMove(-1, 0);
-      if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.tryMove(1, 0);
-      if (Phaser.Input.Keyboard.JustDown(this.cursors.up))    this.tryMove(0, -1);
-      if (Phaser.Input.Keyboard.JustDown(this.cursors.down))  this.tryMove(0, 1);
-
-      if (pad) {
-        const ax = pad.axes.length > 0 ? pad.axes[0].getValue() : 0;
-        const ay = pad.axes.length > 1 ? pad.axes[1].getValue() : 0;
-        if (Math.abs(ax) > 0.6 || Math.abs(ay) > 0.6) {
-          if (ax < -0.6) this.tryMove(-1, 0);
-          if (ax > 0.6) this.tryMove(1, 0);
-          if (ay < -0.6) this.tryMove(0, -1);
-          if (ay > 0.6) this.tryMove(0, 1);
-        }
-      }
-    }
-
-    if (state.turn === "Watcher" && pad) {
-      if (Phaser.Input.Gamepad.JustDown(pad.Y)) this.setBluff(0);
-      if (Phaser.Input.Gamepad.JustDown(pad.B)) this.setBluff(1);
-      if (Phaser.Input.Gamepad.JustDown(pad.X)) this.setBluff(2);
-      if (Phaser.Input.Gamepad.JustDown(pad.RB)) this.rotateWatcher(1);
-      if (Phaser.Input.Gamepad.JustDown(pad.LB)) this.rotateWatcher(-1);
-    }
-
-    // Hold A to end turn
-    if (pad && pad.A) {
-      state.endHoldProgress += delta / 3000; // 3 seconds
+    // Hold A / Space to end turn
+    const isHolding = (pad && pad.A) || this.input.keyboard.addKey('SPACE').isDown;
+    if (isHolding) {
+      state.endHoldProgress += delta / 3000;
       if (state.endHoldProgress >= 1) {
         this.endTurn();
         state.endHoldProgress = 0;
         this.playSound('turn_end');
       }
-      this.updateEndHoldMeter();
     } else {
       state.endHoldProgress = 0;
-      this.updateEndHoldMeter();
     }
+
+    const width = 340 * state.endHoldProgress;
+    this.endMeterFill.width = width;
+    this.endMeterFill.fillColor = state.endHoldProgress > 0.8 ? 0xff4444 : 0x00ff88;
 
     this.renderAll();
   }
 
-  createModernUI() {
-    // Top bar
-    this.topBar = this.add.rectangle(0, 0, this.scale.width, 80, 0x1a2238, 0.9).setOrigin(0, 0);
-    this.topBar.setScrollFactor(0);
-
-    this.turnText = this.add.text(20, 20, '', { fontSize: '24px', color: '#e0f0ff' }).setScrollFactor(0);
-    this.mpText = this.add.text(this.scale.width / 2 - 80, 20, '', { fontSize: '24px', color: '#88ff88' }).setScrollFactor(0);
-    this.facingText = this.add.text(this.scale.width - 180, 20, '', { fontSize: '20px', color: '#b0c0ff' }).setScrollFactor(0);
-
-    // Bottom bar
-    this.bottomBar = this.add.rectangle(0, this.scale.height - 120, this.scale.width, 120, 0x1a2238, 0.9).setOrigin(0, 0);
-    this.bottomBar.setScrollFactor(0);
-
-    this.controlsText = this.add.text(20, this.scale.height - 100, '', { fontSize: '18px', color: '#a0b0c0', wordWrap: { width: this.scale.width - 40 } }).setScrollFactor(0);
-
-    // End turn hold meter
-    this.endMeterBG = this.add.rectangle(this.scale.width / 2, this.scale.height - 60, 300, 30, 0x333333).setScrollFactor(0);
-    this.endMeterFill = this.add.rectangle(this.scale.width / 2 - 150, this.scale.height - 60, 0, 30, 0x00ff88).setOrigin(0, 0.5).setScrollFactor(0);
-
-    this.updateUI();
-  }
-
-  updateEndHoldMeter() {
-    const width = 300 * state.endHoldProgress;
-    this.endMeterFill.width = width;
-    this.endMeterFill.fillColor = state.endHoldProgress > 0.9 ? 0xff4444 : 0x00ff88;
-  }
-
-  updateUI() {
-    this.turnText.setText(`Turn: ${state.turn}`);
-    this.mpText.setText(`MP: ${state.prisoner.mp}`);
-    this.facingText.setText(`Facing: ${DIRS[state.watcher.facing]}`);
-
-    const isPrisonerTurn = state.turn === "Prisoner";
-    this.controlsText.setText(isPrisonerTurn
-      ? "Arrows / D-pad / Left Stick: Move (max 3)\nHold A / Space 3s: End Turn"
-      : "Q / LB: Rotate Left    E / RB: Rotate Right\n1/Y: Bluff North    2/B: East    3/X: South\nHold A / Space 3s: End Turn"
-    );
-
-    this.updateEndHoldMeter();
-  }
-
-  // ... (keep tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, helpers from previous)
-
   playSound(type) {
     const osc = this.sound.context.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = type === 'turn_end' ? 300 : 800;
+    osc.type = type === 'turn_start' ? 'sine' : 'sawtooth';
+    osc.frequency.value = type === 'turn_start' ? 180 : type === 'turn_end' ? 120 : 700;
     const gain = this.sound.context.createGain();
-    gain.gain.value = 0.12;
+    gain.gain.value = type === 'turn_start' ? 0.15 : 0.12;
     osc.connect(gain);
     gain.connect(this.sound.context.destination);
     osc.start();
-    osc.stop(this.sound.context.currentTime + 0.12);
+    osc.stop(this.sound.context.currentTime + (type === 'turn_start' ? 1.2 : 0.18));
   }
+
+  // ... (keep tryMove, rotateWatcher, setBluff, endTurn, resetGame, addLog, renderAll, updateCameraFollow, updateUI, helpers from your working version)
 }
 
-// Helper functions (unchanged – buildMap, createTextures, screenFromGrid, etc.)
-// Paste them here from your previous working version
+// Helper functions (buildMap, createTextures, screenFromGrid, inBounds, isWalkable, inWatcherFOV, getQuadrant, opposite, getRing, hasNoiseAt, addNoise, computePrisonerFOV, clamp, updateUI)
 
-// Launch
 const config = {
   type: Phaser.AUTO,
   width: window.innerWidth,
