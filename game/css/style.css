@@ -125,19 +125,17 @@ html, body {
 .banner.prisoner { color: var(--prisoner); }
 
 /* ---- Touch controls ---- */
-.touch { position: absolute; bottom: 0; left: 0; right: 0; height: 120px; }
+.touch { position: absolute; bottom: 0; left: 0; right: 0; height: 116px; }
 .pad { position: absolute; bottom: 14px; display: none; }
 .pad.active { display: block; }
-.dpad { left: 18px; width: 168px; height: 96px; }
-.dpad .tbtn { position: absolute; width: 52px; height: 44px; }
-.dpad .up { left: 58px; top: 0; }
+.dpad { left: 18px; width: 160px; height: 96px; }
+.dpad .tbtn { position: absolute; width: 50px; height: 44px; }
+.dpad .up { left: 55px; top: 0; }
 .dpad .left { left: 0; top: 50px; }
-.dpad .right { left: 116px; top: 50px; }
-.dpad .down { left: 58px; top: 50px; }
-.dpad .end { left: 58px; top: 0; }        /* overlapped; end is separate below */
-.dpad .end { display: none; }             /* keep dpad clean; End is on right */
+.dpad .right { left: 110px; top: 50px; }
+.dpad .down { left: 55px; top: 50px; }
 
-.wpad { left: 18px; display: none; gap: 6px; }
+.wpad { left: 18px; display: none; gap: 6px; flex-wrap: wrap; max-width: 60vw; }
 .wpad.active { display: flex; }
 .wpad .tbtn { width: 44px; height: 44px; }
 
@@ -146,17 +144,18 @@ html, body {
   border-radius: 10px; font-size: 18px; cursor: pointer;
 }
 .tbtn:active { background: rgba(90,212,230,0.25); }
-.tbtn.end { width: auto; padding: 0 16px; }
 
-/* End-turn + view buttons anchored right */
-#prisonerControls.active ~ .viewbtn,
-.viewbtn {
-  position: absolute; right: 18px; bottom: 70px;
-  padding: 10px 16px; border-radius: 10px; font-size: 14px;
-  background: rgba(20,26,44,0.8); border: 1px solid var(--line); color: var(--text); cursor: pointer;
+.right-controls {
+  position: absolute; right: 18px; bottom: 14px;
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
 }
-/* dedicated End button (bottom-right) always present for prisoner */
-#hud .touch::after { content: ""; }
+.actbtn, .viewbtn {
+  padding: 12px 18px; border-radius: 10px; font-size: 15px; font-weight: 600;
+  background: rgba(20,26,44,0.85); border: 1px solid var(--line); color: var(--text); cursor: pointer;
+}
+.actbtn { background: rgba(90,212,230,0.16); border-color: var(--prisoner); }
+.actbtn:active { background: rgba(90,212,230,0.35); }
+.viewbtn:active { background: rgba(90,212,230,0.25); }
 
 /* ---- Overlay (game over) ---- */
 .overlay-card { text-align: center; }

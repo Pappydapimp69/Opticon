@@ -44,7 +44,9 @@ const scenario = process.argv[2] || "prisoner";
     executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
     args: ["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist", "--no-sandbox"],
   });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const vw = Number(process.env.WIDTH || 1280);
+  const vh = Number(process.env.HEIGHT || 800);
+  const page = await browser.newPage({ viewport: { width: vw, height: vh } });
 
   const errors = [];
   const logs = [];

@@ -82,7 +82,6 @@
       <div id="prisonerControls" class="pad dpad active">
         <button class="tbtn up" data-intent="move" data-arg="0">▲</button>
         <button class="tbtn left" data-intent="move" data-arg="3">◀</button>
-        <button class="tbtn end" data-intent="endTurn">End</button>
         <button class="tbtn right" data-intent="move" data-arg="1">▶</button>
         <button class="tbtn down" data-intent="move" data-arg="2">▼</button>
       </div>
@@ -93,9 +92,11 @@
         <button class="tbtn" data-intent="bluff" data-arg="2">S</button>
         <button class="tbtn" data-intent="bluff" data-arg="3">W</button>
         <button class="tbtn" data-intent="rotate" data-arg="1">⟳</button>
-        <button class="tbtn end" data-intent="endTurn">Scan</button>
       </div>
-      <button class="viewbtn" data-intent="cycleView">◳ View</button>
+      <div class="right-controls">
+        <button class="actbtn" data-intent="endTurn">End / Scan</button>
+        <button class="viewbtn" data-intent="cycleView">◳ View</button>
+      </div>
     </div>
   </div>
 
