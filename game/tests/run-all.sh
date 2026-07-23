@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Run the full Opticon 3D test suite. Exits non-zero on any failure.
+set -e
+cd "$(dirname "$0")/.."
+echo "== logic =="
+node tests/logic.test.mjs
+echo
+echo "== balance =="
+node tests/balance.mjs 200
+echo
+echo "== smoke: prisoner =="
+node tests/smoke.mjs prisoner
+echo
+echo "== smoke: watcher =="
+node tests/smoke.mjs watcher
+echo
+echo "== smoke: hotseat =="
+node tests/smoke.mjs hotseat
+echo
+echo "== wincheck (escape end-screen) =="
+node tests/wincheck.mjs
+echo
+echo "ALL TESTS PASSED"

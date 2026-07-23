@@ -46,9 +46,9 @@ export function makeRng(seed) {
 // Default map shape. Grid is derived so all rings fit with a 1-tile outer wall.
 export const MAP_DEFAULTS = Object.freeze({
   towerRadius: 2, // tower spans Chebyshev r <= towerRadius (a (2R+1)^2 block)
-  moatThickness: 3,
-  ringCount: 5,
-  ringThickness: 4,
+  moatThickness: 2,
+  ringCount: 4,
+  ringThickness: 3,
   border: 1, // outer bounding wall thickness
 });
 
@@ -242,9 +242,9 @@ function addBoundaryDoors(tiles, objects, ring, size, c, cfg, rng) {
 }
 
 function placeExit(tiles, objects, ring, size, c, cfg, rng) {
+  // Exit sits on the outer edge of the outermost ring, on a random cardinal side.
   const side = Math.floor(rng() * 4);
   const { dx, dy } = DIR_VEC[side];
-  // Outer edge of outermost ring.
   const rr = cfg.towerRadius + cfg.moatThickness + cfg.ringCount * cfg.ringThickness;
   let x = c + dx * rr;
   let y = c + dy * rr;
@@ -252,24 +252,29 @@ function placeExit(tiles, objects, ring, size, c, cfg, rng) {
   y = Math.max(1, Math.min(size - 2, y));
   tiles[y][x] = TILE.FLOOR;
   objects[y][x] = OBJ.EXIT;
+  // Clear a short lead-in so the gate isn't walled off.
+  const ix = c + dx * (rr - 1);
+  const iy = c + dy * (rr - 1);
+  if (tiles[iy] && tiles[iy][ix] === TILE.FLOOR && objects[iy][ix] === OBJ.LIGHT) objects[iy][ix] = OBJ.NONE;
   return { x, y, side };
 }
 
 function placeSpawn(tiles, objects, ring, size, c, cfg, exit) {
-  // Opposite side of the exit, outermost ring, on a floor tile.
-  const opp = (exit.side + 2) % 4;
-  const { dx, dy } = DIR_VEC[opp];
-  const rr = cfg.towerRadius + cfg.moatThickness + cfg.ringCount * cfg.ringThickness;
-  let x = Math.max(1, Math.min(size - 2, c + dx * rr));
-  let y = Math.max(1, Math.min(size - 2, c + dy * rr));
-  // Nudge to a walkable floor with no blocking object.
+  // Spawn in an INNER ring (near the tower — maximum tension under the eye),
+  // offset ~90 degrees from the exit so the run is a bounded radial+lateral
+  // journey outward toward the gate, not a half-circumference slog.
+  const spawnSide = (exit.side + 1) % 4;
+  const { dx, dy } = DIR_VEC[spawnSide];
+  const innerR = cfg.towerRadius + cfg.moatThickness + 2; // just inside ring 1
+  let x = Math.max(1, Math.min(size - 2, c + dx * innerR));
+  let y = Math.max(1, Math.min(size - 2, c + dy * innerR));
   const found = nearestFloor(tiles, objects, size, x, y);
   if (found) {
     x = found.x;
     y = found.y;
   }
   tiles[y][x] = TILE.FLOOR;
-  if (objects[y][x] === OBJ.DOOR) objects[y][x] = OBJ.NONE;
+  if (objects[y][x] === OBJ.DOOR || objects[y][x] === OBJ.LIGHT) objects[y][x] = OBJ.NONE;
   return { x, y };
 }
 

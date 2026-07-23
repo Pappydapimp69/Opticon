@@ -13,6 +13,7 @@ import {
   isOver,
 } from "./rules.js";
 import { playWatcherTurn } from "./watcherAI.js";
+import { prisonerAITurn } from "./prisonerAI.js";
 import { Renderer } from "./render.js";
 import { Input } from "./input.js";
 import { Audio } from "./audio.js";
@@ -273,39 +274,11 @@ function scheduleAiPrisoner() {
   }, 650);
 }
 
-// A simple greedy prisoner AI: step toward the exit, preferring quiet single
-// steps, avoiding glass when possible.
+// The in-game AI prisoner uses the shared BFS pathing policy. After it acts we
+// surface any noise it created as pings so the human Watcher gets feedback.
 function aiPrisonerTurn(g) {
-  const p = g.prisoners[g.activePrisoner];
-  const exit = g.map.exit;
-  let steps = 0;
-  while (p.mp > 0 && steps < 3 && !isOver(g)) {
-    const dirs = [0, 1, 2, 3].sort((a, b) => scoreDir(g, p, b, exit) - scoreDir(g, p, a, exit));
-    let moved = false;
-    for (const d of dirs) {
-      const before = { x: p.x, y: p.y, mp: p.mp };
-      const r = moveActivePrisoner(g, d);
-      if (r.ok && (r.event === "move" || r.event === "glass" || r.event === "exit")) {
-        if (r.event === "glass") app.renderer.triggerPing(r.x, r.y);
-        moved = true;
-        steps++;
-        break;
-      }
-    }
-    if (!moved) break;
-    // Keep it quiet: stop after 1 step often to avoid noise (unless close to exit).
-    const distExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y);
-    if (steps >= 1 && distExit > 3 && Math.random() < 0.5) break;
-  }
-}
-
-function scoreDir(g, p, d, exit) {
-  const vec = [[0, -1], [1, 0], [0, 1], [-1, 0]][d];
-  const nx = p.x + vec[0];
-  const ny = p.y + vec[1];
-  const before = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y);
-  const after = Math.abs(nx - exit.x) + Math.abs(ny - exit.y);
-  return before - after + Math.random() * 0.3;
+  prisonerAITurn(g);
+  for (const n of g.noise) app.renderer.triggerPing(n.x, n.y);
 }
 
 // ---- Views ---------------------------------------------------------------
