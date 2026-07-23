@@ -1,0 +1,52 @@
+name: Deploy Opticon 3D to GitHub Pages
+
+# Publishes the game/ directory as the site root, so the game is playable at
+# https://<owner>.github.io/Opticon/ . configure-pages(enablement:true) turns
+# Pages on the first time this runs, so no manual settings change is needed.
+
+on:
+  push:
+    branches:
+      - claude/opticon-3d-browser-game-3lxa2y
+    paths:
+      - "game/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages (enable if needed)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload game/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: game
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
