@@ -210,25 +210,3 @@ html, body {
   box-shadow: 0 0 22px rgba(90,212,230,0.45) !important; }
 .diff.gpfocus { border-color: var(--prisoner); }
 
-/* ---- Staged menu (difficulty -> mode -> hold-to-start) ---- */
-.menu-section.stage-locked { opacity: 0.4; filter: saturate(0.5); transition: opacity 0.25s, filter 0.25s; pointer-events: none; }
-.menu-section.stage-active { opacity: 1; filter: none; pointer-events: auto; }
-.menu-section.stage-done { opacity: 0.7; filter: none; pointer-events: auto; }
-
-.hold-btn {
-  position: relative; width: 100%; padding: 16px; border-radius: 12px;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--line); color: var(--text);
-  font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer; overflow: hidden;
-}
-.hold-btn .hold-fill {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
-  background: linear-gradient(90deg, rgba(90,212,230,0.35), rgba(90,212,230,0.55));
-  transition: none;
-}
-.hold-btn .hold-label { position: relative; z-index: 1; }
-.hold-btn.holding { border-color: var(--prisoner); }
-
-.stage-back {
-  margin-top: 10px; font-size: 12px; color: var(--muted); background: none; border: none;
-  cursor: pointer; padding: 4px 0; text-decoration: underline; text-underline-offset: 2px;
-}

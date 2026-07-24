@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.4.0";
+const BUILD = "beta-0.5.0";
 
 const app = {
   renderer: null,
@@ -77,22 +77,21 @@ function boot() {
   loop(performance.now());
 }
 
-// ---- Intro splash + staged menu navigation --------------------------------
+// ---- Intro splash + menu navigation ----------------------------------------
 //
-// The menu is 3 progressive stages — difficulty -> play type -> hold to
-// start — each gated to its OWN element grid so directional nav can never
-// leak into the next stage's buttons (that leak, combined with A/Start
-// instantly confirming, was why any button but one could accidentally launch
-// a game straight from the splash). Only an explicit confirm advances a
-// stage, and starting the game itself requires a HELD press, not a tap —
-// consistent with the game's own "nothing commits until you deliberately
-// hold/confirm it" philosophy for movement.
+// NOTE: an earlier revision gated this behind 3 locked stages ending in a
+// press-and-hold "start" — that had no resume path, so opening the menu
+// mid-game (or from the game-over screen) abandoned the current run and the
+// ONLY way back into play was completing the whole flow again, generating a
+// brand-new game every time. Removed per explicit feedback. What's kept: the
+// row/col-aware nav (so up/down/left/right still can't wander from the
+// difficulty row onto a play button by accident — that part of the original
+// fix was real and worth keeping) and a safe default focus (Medium, not a
+// play button). What's gone: stage locking and the hold requirement — a
+// single click/confirm on a play button starts immediately again.
 
-const STAGE_IDS = ["stageDifficulty", "stageMode", "stageStart"];
-const menu = { stage: 0, row: 0, col: 1 }; // col:1 = Medium, the current default
+const menu = { row: 0, col: 1 }; // col:1 = Medium — the default focus, never a play button
 let introDone = false;
-let holdProgress = 0;
-let mouseHoldDown = false;
 
 function showIntro() {
   const intro = document.getElementById("intro");
@@ -120,33 +119,20 @@ function openMenu() {
   app.running = false;
   app.ui.showMenu();
   app.input.mode = "menu";
-  menu.stage = 0;
   menu.row = 0;
   menu.col = ["easy", "medium", "hard"].indexOf(app.config.difficulty);
   if (menu.col < 0) menu.col = 1;
-  refreshStageVisibility();
   menuFocusApply();
 }
 
-function stageElements(stageIdx) {
-  const el = document.getElementById(STAGE_IDS[stageIdx]);
-  return el ? Array.from(el.querySelectorAll("[data-row]")) : [];
+function menuElements() {
+  return Array.from(document.querySelectorAll("#menu [data-row]"));
 }
 
 function currentFocusEl() {
-  return stageElements(menu.stage).find(
+  return menuElements().find(
     (el) => Number(el.dataset.row) === menu.row && Number(el.dataset.col) === menu.col
   );
-}
-
-function refreshStageVisibility() {
-  STAGE_IDS.forEach((id, i) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.classList.toggle("stage-active", i === menu.stage);
-    el.classList.toggle("stage-locked", i > menu.stage);
-    el.classList.toggle("stage-done", i < menu.stage);
-  });
 }
 
 function menuFocusApply() {
@@ -158,11 +144,12 @@ function menuFocusApply() {
   }
 }
 
-// Axis-correct: horizontal nav only ever moves column, vertical only ever
-// moves row, within the CURRENT stage's own grid — it cannot reach the next
-// stage's buttons no matter how far you push a direction.
+// Axis-correct: horizontal nav only ever moves column within the current
+// row; vertical nav only ever moves to an adjacent row (landing on that
+// row's nearest column) — a single button grid across the whole menu, not a
+// flat list, so no direction can ever "skip" onto the wrong control.
 function menuNavX(delta) {
-  const els = stageElements(menu.stage).filter((el) => Number(el.dataset.row) === menu.row);
+  const els = menuElements().filter((el) => Number(el.dataset.row) === menu.row);
   const cols = els.map((el) => Number(el.dataset.col)).sort((a, b) => a - b);
   if (cols.length < 2) return;
   const i = cols.indexOf(menu.col);
@@ -174,51 +161,26 @@ function menuNavX(delta) {
 }
 
 function menuNavY(delta) {
-  const els = stageElements(menu.stage);
-  const rows = [...new Set(els.map((el) => Number(el.dataset.row)))].sort((a, b) => a - b);
+  const rows = [...new Set(menuElements().map((el) => Number(el.dataset.row)))].sort((a, b) => a - b);
   if (rows.length < 2) return;
   const i = rows.indexOf(menu.row);
   const next = clamp((i < 0 ? 0 : i) + delta, 0, rows.length - 1);
   if (rows[next] === menu.row) return;
   menu.row = rows[next];
-  // Land on the nearest existing column in the new row (e.g. Hotseat only has col 0).
-  const rowEls = els.filter((el) => Number(el.dataset.row) === menu.row);
-  const rowCols = rowEls.map((el) => Number(el.dataset.col));
+  const rowCols = menuElements()
+    .filter((el) => Number(el.dataset.row) === menu.row)
+    .map((el) => Number(el.dataset.col));
   if (!rowCols.includes(menu.col)) menu.col = rowCols[0] ?? 0;
   menuFocusApply();
   app.audio.play("ui");
 }
 
-// Confirm: stages 0/1 just click the focused element (which selects +
-// advances, see wireMenu). Stage 2 (hold-to-start) is intentionally NOT
-// confirmable by a single tap — only a held press starts the game, so a
-// reflexive button press can never instant-launch a game.
 function menuSelect() {
-  if (menu.stage === 2) return;
   const cur = currentFocusEl();
   if (cur) cur.click();
 }
 
-function menuBack() {
-  if (menu.stage === 0) return;
-  menu.stage -= 1;
-  menu.row = 0;
-  const els = stageElements(menu.stage);
-  menu.col = els.length ? Number(els[0].dataset.col) : 0;
-  refreshStageVisibility();
-  menuFocusApply();
-  app.audio.play("ui");
-}
-
-function advanceStage() {
-  if (menu.stage >= STAGE_IDS.length - 1) return;
-  menu.stage += 1;
-  menu.row = 0;
-  const els = stageElements(menu.stage);
-  menu.col = els.length ? Number(els[0].dataset.col) : 0;
-  refreshStageVisibility();
-  menuFocusApply();
-}
+function menuBack() {} // no stages to back out of anymore; kept as a no-op so input.js's binding stays valid
 
 // Active input scheme changed → refresh device-appropriate hints.
 function onSchemeChange(scheme) {
@@ -228,53 +190,29 @@ function onSchemeChange(scheme) {
 }
 
 function wireMenu() {
-  // Difficulty (stage 0): select + advance, never starts anything.
+  // Difficulty: select only, never starts anything.
   document.querySelectorAll("[data-diff]").forEach((b) => {
     b.addEventListener("click", () => {
       document.querySelectorAll("[data-diff]").forEach((x) => x.classList.remove("sel"));
       b.classList.add("sel");
       app.config.difficulty = b.getAttribute("data-diff");
       app.audio.play("ui");
-      if (menu.stage === 0) {
-        menu.col = Number(b.dataset.col);
-        advanceStage();
-      }
     });
   });
 
-  // Play type (stage 1): select + advance. Does NOT start the game — only
-  // records the choice; the hold-to-start button (stage 2) actually starts.
+  // Play type: selecting ALSO starts the game immediately (single click or
+  // confirm) — this is the direct, no-friction path back into play.
   const modeBind = (id, overrides) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener("click", () => {
-      document.querySelectorAll("#stageMode .play-btn").forEach((x) => x.classList.remove("sel"));
-      el.classList.add("sel");
-      Object.assign(app.config, overrides);
-      app.audio.play("ui");
-      if (menu.stage === 1) {
-        menu.row = Number(el.dataset.row);
-        menu.col = Number(el.dataset.col);
-        advanceStage();
-      }
+      app.audio.resume(); app.audio.play("ui");
+      startGame(overrides);
     });
   };
   modeBind("playPrisoner", { humanRole: "Prisoner", mode: "single" });
   modeBind("playWatcher", { humanRole: "Watcher", mode: "single" });
   modeBind("playHotseat", { humanRole: "Prisoner", mode: "hotseat" });
-
-  // Hold-to-start (stage 2): press-and-hold via mouse/touch. Keyboard and
-  // gamepad holds are polled each frame in loop() (see holdProgress).
-  const holdBtn = document.getElementById("holdStartBtn");
-  if (holdBtn) {
-    const down = (e) => { e.preventDefault(); mouseHoldDown = true; app.audio.resume(); };
-    const up = () => { mouseHoldDown = false; };
-    holdBtn.addEventListener("mousedown", down);
-    holdBtn.addEventListener("touchstart", down, { passive: false });
-    ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((ev) =>
-      holdBtn.addEventListener(ev, up)
-    );
-  }
 
   document.getElementById("btnRestart")?.addEventListener("click", () => {
     app.audio.resume(); app.audio.play("ui"); startGame(app.config);
@@ -283,46 +221,8 @@ function wireMenu() {
     app.audio.resume(); app.audio.play("ui"); openMenu();
   });
 
-  const backBtn = document.querySelectorAll("#menu .stage-back");
-  backBtn.forEach((b) => b.addEventListener("click", menuBack));
-
   const buildEl = document.getElementById("buildLabel");
   if (buildEl) buildEl.textContent = BUILD;
-}
-
-const HOLD_DURATION = 0.6; // seconds
-
-// Polled every frame from loop(): advances the hold-to-start progress bar
-// from whichever input is currently pressing it (keyboard/gamepad/mouse),
-// and starts the game only once the hold completes.
-function updateHoldToStart(dt) {
-  const fill = document.getElementById("holdFill");
-  const btn = document.getElementById("holdStartBtn");
-  if (app.input.mode !== "menu" || menu.stage !== 2) {
-    if (holdProgress !== 0 && fill) fill.style.width = "0%";
-    holdProgress = 0;
-    if (btn) btn.classList.remove("holding");
-    return;
-  }
-  const kbHeld = app.input.isHeld("Enter") || app.input.isHeld("Space");
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const padHeld = !!(pads && pads[0] && pads[0].buttons[0] && pads[0].buttons[0].pressed);
-  const held = kbHeld || padHeld || mouseHoldDown;
-
-  if (held) {
-    holdProgress = Math.min(1, holdProgress + dt / HOLD_DURATION);
-    if (btn) btn.classList.add("holding");
-  } else {
-    holdProgress = Math.max(0, holdProgress - dt * 3); // quick release-decay
-    if (btn) btn.classList.remove("holding");
-  }
-  if (fill) fill.style.width = `${Math.round(holdProgress * 100)}%`;
-  if (holdProgress >= 1) {
-    holdProgress = 0;
-    if (fill) fill.style.width = "0%";
-    if (btn) btn.classList.remove("holding");
-    startGame(app.config);
-  }
 }
 
 function startGame(overrides = {}) {
@@ -695,7 +595,6 @@ function loop(t) {
   const dt = Math.min(0.05, (t - app.lastT) / 1000 || 0);
   app.lastT = t;
   if (app.input) app.input.pollGamepad();
-  updateHoldToStart(dt);
   // Safety net: a staged path only makes sense during the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") resetStagedPath();
   if (app.renderer && app.game) {
