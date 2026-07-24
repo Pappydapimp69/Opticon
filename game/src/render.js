@@ -34,6 +34,17 @@ const TILE_W = 1;
 const WALL_H = 1.1;
 const FLOOR_H = 0.12;
 
+// Frame-rate-independent smoothing factor (Brain dog#E10: a fixed per-frame
+// fraction converges ~2x faster at 60fps than 30fps and jerks on frame
+// spikes). `tau` is a time constant in seconds — larger = slower to catch up.
+function smoothing(dt, tau) {
+  return 1 - Math.exp(-dt / tau);
+}
+
+function easeInOutQuad(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -307,6 +318,11 @@ export class Renderer {
     this.groups.avatar = avatar;
     this.scene.add(avatar);
 
+    // Walk queue: when a committed move covers multiple tiles, the avatar
+    // visibly steps through each one in order (with fired arrival events)
+    // instead of sliding straight from the old tile to the final one.
+    this.walk = { queue: [], from: null, t: 0, stepDur: 0.22 };
+
     // --- Watcher gaze wedge (a flat sector on the ground).
     this.gazeMesh = this.makeWedge(COLORS.gaze, 0.22);
     this.bluffMesh = this.makeWedge(COLORS.bluff, 0.14);
@@ -346,6 +362,26 @@ export class Renderer {
     }
     this.groups.noiseMarks = noiseGroup;
     this.scene.add(noiseGroup);
+
+    // --- Self-noise markers: a prisoner's OWN feedback ("I heard that") for
+    // sound they personally made this turn. Same visual language as the
+    // Watcher's noise intel (same color, same shape) — the meaning is
+    // identical ("sound happened here"), only who may see it differs. Gated
+    // by role (showPrisoner), not camera, and cleared every turn by rules.js.
+    this.selfNoiseMarks = [];
+    const selfNoiseGroup = new THREE.Group();
+    for (let i = 0; i < 12; i++) {
+      const disc = new THREE.Mesh(
+        new THREE.CircleGeometry(0.4, 20),
+        new THREE.MeshBasicMaterial({ color: COLORS.noise, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false })
+      );
+      disc.rotation.x = -Math.PI / 2;
+      disc.visible = false;
+      selfNoiseGroup.add(disc);
+      this.selfNoiseMarks.push(disc);
+    }
+    this.groups.selfNoiseMarks = selfNoiseGroup;
+    this.scene.add(selfNoiseGroup);
 
     // --- Staged movement path preview: a trace over dark tiles, not a light
     // source. Pool sized to MP_PER_TURN; markers + connecting line rebuilt
@@ -428,6 +464,14 @@ export class Renderer {
     return mesh;
   }
 
+  // Enqueue a sequence of grid tiles {x,y,event} for the avatar to visibly
+  // walk through in order, starting from `from`. Replaces any prior queue.
+  walkTo(from, steps) {
+    this.walk.queue = steps.slice();
+    this.walk.from = { x: from.x, y: from.y };
+    this.walk.t = 0;
+  }
+
   triggerPing(x, y) {
     const slot = this.pings.find((p) => !p.active) || this.pings[0];
     slot.active = true;
@@ -457,11 +501,32 @@ export class Renderer {
     const map = game.map;
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
 
-    // Avatar position (smoothed).
-    const targetAX = this.worldX(p.x);
-    const targetAZ = this.worldZ(p.y);
-    this.avatar.position.x += (targetAX - this.avatar.position.x) * Math.min(1, dt * 10);
-    this.avatar.position.z += (targetAZ - this.avatar.position.z) * Math.min(1, dt * 10);
+    // Avatar position: walk a queued path tile-by-tile if one is active (a
+    // just-committed move — Brain telegraph#E6: the sim already resolved
+    // this, only the visual catches up), otherwise smoothly settle toward the
+    // prisoner's real tile (AI moves, teleports, idle).
+    const arrived = [];
+    if (this.walk.queue.length) {
+      const target = this.walk.queue[0];
+      this.walk.t = Math.min(1, this.walk.t + dt / this.walk.stepDur);
+      const te = easeInOutQuad(this.walk.t);
+      this.avatar.position.x =
+        this.worldX(this.walk.from.x) + (this.worldX(target.x) - this.worldX(this.walk.from.x)) * te;
+      this.avatar.position.z =
+        this.worldZ(this.walk.from.y) + (this.worldZ(target.y) - this.worldZ(this.walk.from.y)) * te;
+      if (this.walk.t >= 1) {
+        this.walk.from = { x: target.x, y: target.y };
+        this.walk.queue.shift();
+        this.walk.t = 0;
+        arrived.push(target);
+      }
+    } else {
+      const targetAX = this.worldX(p.x);
+      const targetAZ = this.worldZ(p.y);
+      const k = smoothing(dt, 0.1);
+      this.avatar.position.x += (targetAX - this.avatar.position.x) * k;
+      this.avatar.position.z += (targetAZ - this.avatar.position.z) * k;
+    }
     // Fairness: the Watcher never sees prisoners directly. `showPrisoner` is
     // decided by the caller (hidden for a pure Watcher; hidden on the Watcher's
     // turn in hotseat). Falls back to visible when unspecified.
@@ -478,14 +543,15 @@ export class Renderer {
       // Position the eye offset toward facing direction on top of tower.
       const off = (map.cfg.towerRadius + 0.2);
       const v = DIR_VEC[facing];
-      this.eye.position.x += (v.dx * off - this.eye.position.x) * Math.min(1, dt * 8);
-      this.eye.position.z += (v.dy * off - this.eye.position.z) * Math.min(1, dt * 8);
+      const eyeK = smoothing(dt, 0.125);
+      this.eye.position.x += (v.dx * off - this.eye.position.x) * eyeK;
+      this.eye.position.z += (v.dy * off - this.eye.position.z) * eyeK;
     }
 
     // Dynamic lights follow light state.
     for (const dl of this.dynamicLights) {
       const on = game.lightState[dl.group];
-      dl.light.intensity += ((on ? 1.0 : 0) - dl.light.intensity) * Math.min(1, dt * 6);
+      dl.light.intensity += ((on ? 1.0 : 0) - dl.light.intensity) * smoothing(dt, 0.167);
       dl.mesh.material.color.setHex(on ? COLORS.lampOn : COLORS.lampOff);
     }
 
@@ -496,9 +562,28 @@ export class Renderer {
       mesh.visible = !open;
     }
 
-    // Gaze + bluff wedges: shown in Watcher & Overview views (public info there).
-    // Hidden in the Prisoner view — the prisoner must read the tower eye + doubt.
-    const showGaze = this.viewMode !== "prisoner";
+    // Self-noise: this prisoner's own "I heard that" markers. Role-gated only
+    // (showPrisoner), independent of camera — it's private feedback, not tied
+    // to a particular viewing angle.
+    const selfNoise = opts.selfNoise || [];
+    for (let i = 0; i < this.selfNoiseMarks.length; i++) {
+      const disc = this.selfNoiseMarks[i];
+      const n = selfNoise[i];
+      if (opts.showPrisoner && n) {
+        disc.visible = true;
+        disc.position.set(this.worldX(n.x), 0.055, this.worldZ(n.y));
+        disc.material.opacity = 0.3 + 0.1 * Math.sin(this.time * 4 + i);
+      } else {
+        disc.visible = false;
+      }
+    }
+
+    // Gaze + bluff wedges: only for whoever is legitimately "being" the Watcher
+    // right now (role-gated, not just camera-gated) — a Prisoner-role human
+    // must never see the true gaze, even by cycling their own camera to the
+    // watcher/overview angle. Also hidden on the ground-level prisoner camera
+    // for the legitimate Watcher, for atmosphere/clutter reasons.
+    const showGaze = this.viewMode !== "prisoner" && !!opts.showWatcherInfo;
     this.updateWedge(this.gazeMesh, facing, showGaze);
     this.updateWedge(
       this.bluffMesh,
@@ -506,8 +591,8 @@ export class Renderer {
       showGaze && game.watcher.bluff != null
     );
 
-    // Persistent noise markers — the Watcher's standing intel (watcher/overview).
-    const showNoise = this.viewMode !== "prisoner";
+    // Persistent noise markers — the Watcher's standing intel, same role gate.
+    const showNoise = this.viewMode !== "prisoner" && !!opts.showWatcherInfo;
     for (let i = 0; i < this.noiseMarks.length; i++) {
       const disc = this.noiseMarks[i];
       const n = game.noise[i];
@@ -545,6 +630,7 @@ export class Renderer {
     this.updateCamera(game, p, dt, opts);
 
     this.renderer.render(this.scene, this.camera);
+    return { arrived };
   }
 
   renderOnce() {
@@ -670,7 +756,7 @@ export class Renderer {
       );
     }
 
-    const k = Math.min(1, dt * 4);
+    const k = smoothing(dt, 0.25);
     this.camPos.lerp(tPos, k);
     this.camTarget.lerp(tTarget, k);
     this.camera.position.copy(this.camPos);

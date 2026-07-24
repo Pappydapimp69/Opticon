@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.3.0";
+const BUILD = "beta-0.4.0";
 
 const app = {
   renderer: null,
@@ -53,7 +53,7 @@ function boot() {
   app.ui = new UI(document.body);
   app.input = new Input(handleIntent, { onScheme: onSchemeChange });
   app.input.setIntroHandler(dismissIntro);
-  app.input.setMenuHandlers(menuNav, menuSelect);
+  app.input.setMenuHandlers(menuNavX, menuNavY, menuSelect, menuBack);
 
   const introEl = document.getElementById("intro");
   if (introEl) introEl.addEventListener("pointerdown", dismissIntro);
@@ -77,10 +77,22 @@ function boot() {
   loop(performance.now());
 }
 
-// ---- Intro splash + menu navigation --------------------------------------
+// ---- Intro splash + staged menu navigation --------------------------------
+//
+// The menu is 3 progressive stages — difficulty -> play type -> hold to
+// start — each gated to its OWN element grid so directional nav can never
+// leak into the next stage's buttons (that leak, combined with A/Start
+// instantly confirming, was why any button but one could accidentally launch
+// a game straight from the splash). Only an explicit confirm advances a
+// stage, and starting the game itself requires a HELD press, not a tap —
+// consistent with the game's own "nothing commits until you deliberately
+// hold/confirm it" philosophy for movement.
 
-const menu = { els: [], idx: 0 };
+const STAGE_IDS = ["stageDifficulty", "stageMode", "stageStart"];
+const menu = { stage: 0, row: 0, col: 1 }; // col:1 = Medium, the current default
 let introDone = false;
+let holdProgress = 0;
+let mouseHoldDown = false;
 
 function showIntro() {
   const intro = document.getElementById("intro");
@@ -108,37 +120,104 @@ function openMenu() {
   app.running = false;
   app.ui.showMenu();
   app.input.mode = "menu";
-  buildMenuFocus();
-}
-
-function buildMenuFocus() {
-  menu.els = [
-    ...document.querySelectorAll("#menu [data-diff]"),
-    document.getElementById("playPrisoner"),
-    document.getElementById("playWatcher"),
-    document.getElementById("playHotseat"),
-  ].filter(Boolean);
-  // Center the default on the primary action, not an edge (Brain: focus lever).
-  menu.idx = Math.max(0, menu.els.indexOf(document.getElementById("playPrisoner")));
+  menu.stage = 0;
+  menu.row = 0;
+  menu.col = ["easy", "medium", "hard"].indexOf(app.config.difficulty);
+  if (menu.col < 0) menu.col = 1;
+  refreshStageVisibility();
   menuFocusApply();
 }
 
-function menuFocusApply() {
-  menu.els.forEach((el, i) => el.classList.toggle("gpfocus", i === menu.idx));
-  const cur = menu.els[menu.idx];
-  if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+function stageElements(stageIdx) {
+  const el = document.getElementById(STAGE_IDS[stageIdx]);
+  return el ? Array.from(el.querySelectorAll("[data-row]")) : [];
 }
 
-function menuNav(dir) {
-  if (!menu.els.length) return;
-  menu.idx = (menu.idx + dir + menu.els.length) % menu.els.length;
+function currentFocusEl() {
+  return stageElements(menu.stage).find(
+    (el) => Number(el.dataset.row) === menu.row && Number(el.dataset.col) === menu.col
+  );
+}
+
+function refreshStageVisibility() {
+  STAGE_IDS.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle("stage-active", i === menu.stage);
+    el.classList.toggle("stage-locked", i > menu.stage);
+    el.classList.toggle("stage-done", i < menu.stage);
+  });
+}
+
+function menuFocusApply() {
+  document.querySelectorAll(".gpfocus").forEach((el) => el.classList.remove("gpfocus"));
+  const cur = currentFocusEl();
+  if (cur) {
+    cur.classList.add("gpfocus");
+    if (cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// Axis-correct: horizontal nav only ever moves column, vertical only ever
+// moves row, within the CURRENT stage's own grid — it cannot reach the next
+// stage's buttons no matter how far you push a direction.
+function menuNavX(delta) {
+  const els = stageElements(menu.stage).filter((el) => Number(el.dataset.row) === menu.row);
+  const cols = els.map((el) => Number(el.dataset.col)).sort((a, b) => a - b);
+  if (cols.length < 2) return;
+  const i = cols.indexOf(menu.col);
+  const next = clamp((i < 0 ? 0 : i) + delta, 0, cols.length - 1);
+  if (cols[next] === menu.col) return;
+  menu.col = cols[next];
   menuFocusApply();
   app.audio.play("ui");
 }
 
+function menuNavY(delta) {
+  const els = stageElements(menu.stage);
+  const rows = [...new Set(els.map((el) => Number(el.dataset.row)))].sort((a, b) => a - b);
+  if (rows.length < 2) return;
+  const i = rows.indexOf(menu.row);
+  const next = clamp((i < 0 ? 0 : i) + delta, 0, rows.length - 1);
+  if (rows[next] === menu.row) return;
+  menu.row = rows[next];
+  // Land on the nearest existing column in the new row (e.g. Hotseat only has col 0).
+  const rowEls = els.filter((el) => Number(el.dataset.row) === menu.row);
+  const rowCols = rowEls.map((el) => Number(el.dataset.col));
+  if (!rowCols.includes(menu.col)) menu.col = rowCols[0] ?? 0;
+  menuFocusApply();
+  app.audio.play("ui");
+}
+
+// Confirm: stages 0/1 just click the focused element (which selects +
+// advances, see wireMenu). Stage 2 (hold-to-start) is intentionally NOT
+// confirmable by a single tap — only a held press starts the game, so a
+// reflexive button press can never instant-launch a game.
 function menuSelect() {
-  const cur = menu.els[menu.idx];
+  if (menu.stage === 2) return;
+  const cur = currentFocusEl();
   if (cur) cur.click();
+}
+
+function menuBack() {
+  if (menu.stage === 0) return;
+  menu.stage -= 1;
+  menu.row = 0;
+  const els = stageElements(menu.stage);
+  menu.col = els.length ? Number(els[0].dataset.col) : 0;
+  refreshStageVisibility();
+  menuFocusApply();
+  app.audio.play("ui");
+}
+
+function advanceStage() {
+  if (menu.stage >= STAGE_IDS.length - 1) return;
+  menu.stage += 1;
+  menu.row = 0;
+  const els = stageElements(menu.stage);
+  menu.col = els.length ? Number(els[0].dataset.col) : 0;
+  refreshStageVisibility();
+  menuFocusApply();
 }
 
 // Active input scheme changed → refresh device-appropriate hints.
@@ -149,28 +228,101 @@ function onSchemeChange(scheme) {
 }
 
 function wireMenu() {
-  const bind = (id, fn) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener("click", () => { app.audio.resume(); app.audio.play("ui"); fn(); });
-  };
-  bind("playPrisoner", () => startGame({ humanRole: "Prisoner", mode: "single" }));
-  bind("playWatcher", () => startGame({ humanRole: "Watcher", mode: "single" }));
-  bind("playHotseat", () => startGame({ mode: "hotseat", humanRole: "Prisoner" }));
-  bind("btnRestart", () => startGame(app.config));
-  bind("btnMenu", () => openMenu());
-
-  // Difficulty selector.
+  // Difficulty (stage 0): select + advance, never starts anything.
   document.querySelectorAll("[data-diff]").forEach((b) => {
     b.addEventListener("click", () => {
       document.querySelectorAll("[data-diff]").forEach((x) => x.classList.remove("sel"));
       b.classList.add("sel");
       app.config.difficulty = b.getAttribute("data-diff");
       app.audio.play("ui");
+      if (menu.stage === 0) {
+        menu.col = Number(b.dataset.col);
+        advanceStage();
+      }
     });
   });
 
+  // Play type (stage 1): select + advance. Does NOT start the game — only
+  // records the choice; the hold-to-start button (stage 2) actually starts.
+  const modeBind = (id, overrides) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("click", () => {
+      document.querySelectorAll("#stageMode .play-btn").forEach((x) => x.classList.remove("sel"));
+      el.classList.add("sel");
+      Object.assign(app.config, overrides);
+      app.audio.play("ui");
+      if (menu.stage === 1) {
+        menu.row = Number(el.dataset.row);
+        menu.col = Number(el.dataset.col);
+        advanceStage();
+      }
+    });
+  };
+  modeBind("playPrisoner", { humanRole: "Prisoner", mode: "single" });
+  modeBind("playWatcher", { humanRole: "Watcher", mode: "single" });
+  modeBind("playHotseat", { humanRole: "Prisoner", mode: "hotseat" });
+
+  // Hold-to-start (stage 2): press-and-hold via mouse/touch. Keyboard and
+  // gamepad holds are polled each frame in loop() (see holdProgress).
+  const holdBtn = document.getElementById("holdStartBtn");
+  if (holdBtn) {
+    const down = (e) => { e.preventDefault(); mouseHoldDown = true; app.audio.resume(); };
+    const up = () => { mouseHoldDown = false; };
+    holdBtn.addEventListener("mousedown", down);
+    holdBtn.addEventListener("touchstart", down, { passive: false });
+    ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((ev) =>
+      holdBtn.addEventListener(ev, up)
+    );
+  }
+
+  document.getElementById("btnRestart")?.addEventListener("click", () => {
+    app.audio.resume(); app.audio.play("ui"); startGame(app.config);
+  });
+  document.getElementById("btnMenu")?.addEventListener("click", () => {
+    app.audio.resume(); app.audio.play("ui"); openMenu();
+  });
+
+  const backBtn = document.querySelectorAll("#menu .stage-back");
+  backBtn.forEach((b) => b.addEventListener("click", menuBack));
+
   const buildEl = document.getElementById("buildLabel");
   if (buildEl) buildEl.textContent = BUILD;
+}
+
+const HOLD_DURATION = 0.6; // seconds
+
+// Polled every frame from loop(): advances the hold-to-start progress bar
+// from whichever input is currently pressing it (keyboard/gamepad/mouse),
+// and starts the game only once the hold completes.
+function updateHoldToStart(dt) {
+  const fill = document.getElementById("holdFill");
+  const btn = document.getElementById("holdStartBtn");
+  if (app.input.mode !== "menu" || menu.stage !== 2) {
+    if (holdProgress !== 0 && fill) fill.style.width = "0%";
+    holdProgress = 0;
+    if (btn) btn.classList.remove("holding");
+    return;
+  }
+  const kbHeld = app.input.isHeld("Enter") || app.input.isHeld("Space");
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const padHeld = !!(pads && pads[0] && pads[0].buttons[0] && pads[0].buttons[0].pressed);
+  const held = kbHeld || padHeld || mouseHoldDown;
+
+  if (held) {
+    holdProgress = Math.min(1, holdProgress + dt / HOLD_DURATION);
+    if (btn) btn.classList.add("holding");
+  } else {
+    holdProgress = Math.max(0, holdProgress - dt * 3); // quick release-decay
+    if (btn) btn.classList.remove("holding");
+  }
+  if (fill) fill.style.width = `${Math.round(holdProgress * 100)}%`;
+  if (holdProgress >= 1) {
+    holdProgress = 0;
+    if (fill) fill.style.width = "0%";
+    if (btn) btn.classList.remove("holding");
+    startGame(app.config);
+  }
 }
 
 function startGame(overrides = {}) {
@@ -192,7 +344,7 @@ function startGame(overrides = {}) {
   app.audio.resume();
   app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
-  app.ui.updateHud(app.game, app.viewMode, humanLabel());
+  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
   app.ui.renderLog(app.game);
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -268,7 +420,7 @@ function handleIntent(intent, arg) {
   } else {
     handleWatcherIntent(intent, arg);
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
   app.ui.renderLog(g);
 }
 
@@ -332,7 +484,7 @@ function stagePathExtend(dir) {
       if (r.ok) {
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
-        app.ui.updateHud(g, app.viewMode, humanLabel());
+        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
         app.ui.renderLog(g);
       }
     } else {
@@ -352,21 +504,27 @@ function stagePathExtend(dir) {
 
 // Replay the staged steps as real moves, in order — the same events/audio the
 // old per-keypress code produced, just batched behind one confirm press.
+// Apply the whole staged path to the authoritative sim immediately (Brain
+// telegraph#E6: the commit IS the real consequence, resolves now), but hand
+// the resulting tile sequence to the renderer as a walk queue so the avatar
+// visibly steps through it — audio/banner/game-over are deferred to match
+// each tile's actual visual arrival (see loop()).
 function commitStagedPath() {
   const g = app.game;
   const path = app.stagedPath;
   if (!g || !path.length) return;
+  const p = g.prisoners[g.activePrisoner];
+  const fromTile = { x: p.x, y: p.y };
+  const walkSteps = [];
   for (const step of path) {
     if (isOver(g)) break;
     const r = moveActivePrisoner(g, step.dir);
     if (!r.ok) break; // defensive; steps were pre-validated as walkable
-    if (r.event === "glass") { app.audio.play("glass"); app.renderer.triggerPing(r.x, r.y); }
-    else if (r.event === "exit") { app.audio.play("escape"); app.ui.banner("ESCAPED!", "good"); }
-    else app.audio.play("move");
+    walkSteps.push({ x: p.x, y: p.y, event: r.event });
   }
   app.stagedPath = [];
-  checkOver();
-  app.ui.updateHud(g, app.viewMode, humanLabel());
+  app.renderer.walkTo(fromTile, walkSteps);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
   app.ui.renderLog(g);
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -444,7 +602,7 @@ function scheduleAiWatcher() {
     }
     app.aiThinking = false;
     checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel());
+    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
     app.ui.renderLog(g);
     if (!isOver(g)) app.ui.banner("Your move", "prisoner");
     app.ui.hint(hintFor());
@@ -463,7 +621,7 @@ function scheduleAiPrisoner() {
     endPrisonerTurn(g);
     app.aiThinking = false;
     checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel());
+    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
     app.ui.renderLog(g);
     if (!isOver(g)) app.ui.banner("Watcher's turn — your move", "watcher");
     app.ui.hint(hintFor());
@@ -491,6 +649,18 @@ function shouldShowPrisoner() {
   return false; // single-player Watcher
 }
 
+// The reciprocal: is the CURRENT viewer legitimately "being" the Watcher right
+// now? Only then may the gaze wedge, bluff wedge, Watcher's noise-intel, or
+// the HUD's facing text be shown — never to a Prisoner-role human, and never
+// during an AI Watcher's turn (a single-player Prisoner must never read the
+// AI's facing off the HUD, or it trivially dodges every scan).
+function shouldShowWatcherInfo() {
+  if (!app.game) return false;
+  if (app.config.humanRole === "Watcher" && app.config.mode === "single") return true;
+  if (app.config.mode === "hotseat") return app.game.turn === "Watcher";
+  return false; // single-player Prisoner (vs AI Watcher)
+}
+
 function cycleView() {
   // A pure Watcher can't peek through the prisoner's eyes.
   const order =
@@ -504,7 +674,7 @@ function cycleView() {
 function setView(mode) {
   app.viewMode = mode;
   app.renderer.setViewMode(mode);
-  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel());
+  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
 }
 
 // ---- End condition -------------------------------------------------------
@@ -525,13 +695,30 @@ function loop(t) {
   const dt = Math.min(0.05, (t - app.lastT) / 1000 || 0);
   app.lastT = t;
   if (app.input) app.input.pollGamepad();
+  updateHoldToStart(dt);
   // Safety net: a staged path only makes sense during the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") resetStagedPath();
   if (app.renderer && app.game) {
-    app.renderer.update(app.game, dt, {
+    const activePrisoner = app.game.prisoners[app.game.activePrisoner];
+    const result = app.renderer.update(app.game, dt, {
       showPrisoner: shouldShowPrisoner(),
+      showWatcherInfo: shouldShowWatcherInfo(),
       stagedPath: app.stagedPath,
+      selfNoise: (activePrisoner && activePrisoner.selfNoise) || [],
     });
+    // The avatar just visually arrived at one or more committed tiles — fire
+    // that tile's audio/ping now (matching the footstep, not the sim resolve).
+    if (result && result.arrived && result.arrived.length) {
+      for (const step of result.arrived) {
+        if (step.event === "glass") { app.audio.play("glass"); app.renderer.triggerPing(step.x, step.y); }
+        else if (step.event === "exit") { app.audio.play("escape"); app.ui.banner("ESCAPED!", "good"); }
+        else app.audio.play("move");
+      }
+      // Only check game-over once the whole committed path has finished
+      // walking — an escape shouldn't end the game before you've visibly
+      // reached the gate.
+      if (app.renderer.walk.queue.length === 0) checkOver();
+    }
   } else if (app.renderer) {
     app.renderer.renderOnce();
   }
