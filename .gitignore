@@ -6,3 +6,6 @@ game/tests/shot-*.png
 game/tests/play-*.png
 game/tests/view-*.png
 game/tests/win-*.png
+game/tests/intro.png
+game/tests/menu-focus.png
+game/tests/mobile-*.png
