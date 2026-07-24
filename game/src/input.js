@@ -1,44 +1,81 @@
 // input.js — Unified input: keyboard, on-screen touch buttons, gamepad.
-// Emits high-level intents via a callback so main.js stays device-agnostic.
+// All dispatch is by `mode` ('intro' | 'menu' | 'game') so the same devices
+// drive whichever screen is up. Tracks the active scheme so the UI can show
+// device-appropriate hints (Brain: device-adaptive-ui / show-the-active-scheme).
+// Gamepad is polled every frame and its gate is independent of audio's
+// (Brain dog#E47): a gamepad button press is what reveals the pad in Chrome.
 
 export class Input {
-  constructor(onIntent) {
+  constructor(onIntent, opts = {}) {
     this.onIntent = onIntent;
+    this.onScheme = opts.onScheme || (() => {});
+    this.mode = "game";
     this.keys = new Set();
     this.padPrev = [];
-    this.orbit = { dragging: false, lastX: 0, lastY: 0, onOrbit: null, onZoom: null };
+    this._stickHeld = false;
+    this.activeScheme = "keyboard";
+    this.menuHandlers = null; // { nav(dir), select() }
+    this.introHandler = null; // () => void
     this._bindKeyboard();
+    // The very first gamepad press (which unlocks the API) should also dismiss
+    // the intro, so a controller-only player never gets stuck on the splash.
+    window.addEventListener("gamepadconnected", () => {
+      this._setScheme("gamepad");
+      if (this.mode === "intro" && this.introHandler) this.introHandler();
+    });
   }
+
+  setScheme(s) { this._setScheme(s); }
+  _setScheme(s) {
+    if (this.activeScheme === s) return;
+    this.activeScheme = s;
+    this.onScheme(s);
+  }
+
+  setMenuHandlers(nav, select) { this.menuHandlers = { nav, select }; }
+  setIntroHandler(fn) { this.introHandler = fn; }
 
   _bindKeyboard() {
     window.addEventListener("keydown", (e) => {
-      if (this.keys.has(e.code)) return; // ignore auto-repeat for intents
+      if (this.keys.has(e.code)) return; // ignore auto-repeat
       this.keys.add(e.code);
+      this._setScheme("keyboard");
       this._handleKey(e);
     });
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
   }
 
   _handleKey(e) {
+    // Intro: any key begins.
+    if (this.mode === "intro") {
+      if (this.introHandler) this.introHandler();
+      e.preventDefault();
+      return;
+    }
+    // Menu: arrows/WASD move focus, Enter/Space select.
+    if (this.mode === "menu" && this.menuHandlers) {
+      const nav = this.menuHandlers.nav, sel = this.menuHandlers.select;
+      const m = {
+        ArrowUp: () => nav(-1), KeyW: () => nav(-1),
+        ArrowLeft: () => nav(-1), KeyA: () => nav(-1),
+        ArrowDown: () => nav(1), KeyS: () => nav(1),
+        ArrowRight: () => nav(1), KeyD: () => nav(1),
+        Enter: () => sel(), Space: () => sel(),
+      };
+      if (m[e.code]) { e.preventDefault(); m[e.code](); }
+      return;
+    }
+    // Game.
     const map = {
-      ArrowUp: () => this.onIntent("move", 0),
-      KeyW: () => this.onIntent("move", 0),
-      ArrowRight: () => this.onIntent("move", 1),
-      KeyD: () => this.onIntent("move", 1),
-      ArrowDown: () => this.onIntent("move", 2),
-      KeyS: () => this.onIntent("move", 2),
-      ArrowLeft: () => this.onIntent("move", 3),
-      KeyA: () => this.onIntent("move", 3),
-      Space: () => this.onIntent("endTurn"),
-      Enter: () => this.onIntent("endTurn"),
-      KeyQ: () => this.onIntent("rotate", -1),
-      KeyE: () => this.onIntent("rotate", 1),
-      Digit1: () => this.onIntent("bluff", 0),
-      Digit2: () => this.onIntent("bluff", 1),
-      Digit3: () => this.onIntent("bluff", 2),
-      Digit4: () => this.onIntent("bluff", 3),
-      Tab: () => this.onIntent("cycleView"),
-      KeyV: () => this.onIntent("cycleView"),
+      ArrowUp: () => this.onIntent("move", 0), KeyW: () => this.onIntent("move", 0),
+      ArrowRight: () => this.onIntent("move", 1), KeyD: () => this.onIntent("move", 1),
+      ArrowDown: () => this.onIntent("move", 2), KeyS: () => this.onIntent("move", 2),
+      ArrowLeft: () => this.onIntent("move", 3), KeyA: () => this.onIntent("move", 3),
+      Space: () => this.onIntent("endTurn"), Enter: () => this.onIntent("endTurn"),
+      KeyQ: () => this.onIntent("rotate", -1), KeyE: () => this.onIntent("rotate", 1),
+      Digit1: () => this.onIntent("bluff", 0), Digit2: () => this.onIntent("bluff", 1),
+      Digit3: () => this.onIntent("bluff", 2), Digit4: () => this.onIntent("bluff", 3),
+      Tab: () => this.onIntent("cycleView"), KeyV: () => this.onIntent("cycleView"),
       KeyR: () => this.onIntent("restart"),
     };
     if (map[e.code]) {
@@ -47,11 +84,11 @@ export class Input {
     }
   }
 
-  // Touch buttons: call with a container element holding [data-intent] buttons.
   bindTouchButtons(root) {
     root.querySelectorAll("[data-intent]").forEach((btn) => {
       const fire = (ev) => {
         ev.preventDefault();
+        this._setScheme("touch");
         const intent = btn.getAttribute("data-intent");
         const arg = btn.getAttribute("data-arg");
         this.onIntent(intent, arg != null ? Number(arg) : undefined);
@@ -61,51 +98,33 @@ export class Input {
     });
   }
 
-  // Orbit/zoom drag on the canvas.
   bindCanvasOrbit(canvas, onOrbit, onZoom) {
-    this.orbit.onOrbit = onOrbit;
-    this.orbit.onZoom = onZoom;
-    const start = (x, y) => {
-      this.orbit.dragging = true;
-      this.orbit.lastX = x;
-      this.orbit.lastY = y;
-    };
+    const start = (x, y) => { this.orbitDrag = true; this.lastX = x; this.lastY = y; };
     const move = (x, y) => {
-      if (!this.orbit.dragging) return;
-      const dx = x - this.orbit.lastX;
-      const dy = y - this.orbit.lastY;
-      this.orbit.lastX = x;
-      this.orbit.lastY = y;
-      onOrbit(dx * 0.008, dy * 0.006);
+      if (!this.orbitDrag) return;
+      onOrbit((x - this.lastX) * 0.008, (y - this.lastY) * 0.006);
+      this.lastX = x; this.lastY = y;
     };
-    const end = () => (this.orbit.dragging = false);
-
+    const end = () => (this.orbitDrag = false);
     canvas.addEventListener("mousedown", (e) => start(e.clientX, e.clientY));
     window.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
     window.addEventListener("mouseup", end);
-    canvas.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      onZoom(Math.sign(e.deltaY) * 1.2);
-    }, { passive: false });
-
-    // Touch: single finger orbit, pinch zoom.
-    let pinchDist = 0;
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); onZoom(Math.sign(e.deltaY) * 1.2); }, { passive: false });
+    let pinch = 0;
     canvas.addEventListener("touchstart", (e) => {
+      this._setScheme("touch");
       if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY);
-      else if (e.touches.length === 2) pinchDist = touchDist(e);
+      else if (e.touches.length === 2) pinch = touchDist(e);
     }, { passive: true });
     canvas.addEventListener("touchmove", (e) => {
       if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY);
-      else if (e.touches.length === 2) {
-        const d = touchDist(e);
-        onZoom((pinchDist - d) * 0.03);
-        pinchDist = d;
-      }
+      else if (e.touches.length === 2) { const d = touchDist(e); onZoom((pinch - d) * 0.03); pinch = d; }
     }, { passive: true });
     canvas.addEventListener("touchend", end);
   }
 
-  // Poll gamepad each frame; translate edges to intents.
+  // Called every frame. Reads the pad once, marks the scheme on any activity,
+  // and dispatches by mode.
   pollGamepad() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = pads && pads[0];
@@ -113,39 +132,57 @@ export class Input {
     const pressed = pad.buttons.map((b) => b.pressed);
     const prev = this.padPrev;
     const edge = (i) => pressed[i] && !prev[i];
-
-    // D-pad / face buttons.
-    if (edge(12)) this.onIntent("move", 0); // up
-    if (edge(15)) this.onIntent("move", 1); // right
-    if (edge(13)) this.onIntent("move", 2); // down
-    if (edge(14)) this.onIntent("move", 3); // left
-    // Left stick edges.
-    const ax = pad.axes[0] || 0;
-    const ay = pad.axes[1] || 0;
-    const stickKey = "stick";
-    const now = this._stickLatch || 0;
+    const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
     const mag = Math.max(Math.abs(ax), Math.abs(ay));
+    const anyEdge = pressed.some((p, i) => p && !prev[i]);
+    if (anyEdge || mag > 0.5) this._setScheme("gamepad");
+
+    // Debounced stick → a single directional pulse.
+    let stickDir = null; // 0 up,1 right,2 down,3 left
     if (mag > 0.6 && !this._stickHeld) {
       this._stickHeld = true;
-      if (Math.abs(ax) > Math.abs(ay)) this.onIntent("move", ax > 0 ? 1 : 3);
-      else this.onIntent("move", ay > 0 ? 2 : 0);
+      stickDir = Math.abs(ax) > Math.abs(ay) ? (ax > 0 ? 1 : 3) : (ay > 0 ? 2 : 0);
     } else if (mag < 0.35) {
       this._stickHeld = false;
     }
 
-    if (edge(0)) this.onIntent("endTurn"); // A
+    if (this.mode === "intro") {
+      if (anyEdge) this.introHandler && this.introHandler();
+      this.padPrev = pressed;
+      return;
+    }
+
+    if (this.mode === "menu" && this.menuHandlers) {
+      const { nav, select } = this.menuHandlers;
+      if (edge(12)) nav(-1); // dpad up
+      if (edge(13)) nav(1);  // dpad down
+      if (edge(14)) nav(-1); // dpad left
+      if (edge(15)) nav(1);  // dpad right
+      if (stickDir === 0 || stickDir === 3) nav(-1);
+      if (stickDir === 1 || stickDir === 2) nav(1);
+      if (edge(0) || edge(9)) select(); // A / Start
+      this.padPrev = pressed;
+      return;
+    }
+
+    // Game.
+    if (edge(12)) this.onIntent("move", 0);
+    if (edge(15)) this.onIntent("move", 1);
+    if (edge(13)) this.onIntent("move", 2);
+    if (edge(14)) this.onIntent("move", 3);
+    if (stickDir != null) this.onIntent("move", stickDir);
+    if (edge(0)) this.onIntent("endTurn");   // A
     if (edge(4)) this.onIntent("rotate", -1); // LB
-    if (edge(5)) this.onIntent("rotate", 1); // RB
-    if (edge(3)) this.onIntent("bluff", 0); // Y (north)
-    if (edge(1)) this.onIntent("bluff", 1); // B (east)
-    if (edge(2)) this.onIntent("bluff", 3); // X (west)
-    if (edge(9)) this.onIntent("cycleView"); // Start
+    if (edge(5)) this.onIntent("rotate", 1);  // RB
+    if (edge(3)) this.onIntent("bluff", 0);   // Y
+    if (edge(1)) this.onIntent("bluff", 1);   // B
+    if (edge(2)) this.onIntent("bluff", 3);   // X
+    if (edge(9)) this.onIntent("cycleView");  // Start
     this.padPrev = pressed;
   }
 }
 
 function touchDist(e) {
-  const a = e.touches[0];
-  const b = e.touches[1];
+  const a = e.touches[0], b = e.touches[1];
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }

@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
+  await page.keyboard.press("Enter"); await page.waitForTimeout(700);
   await page.click("#playWatcher"); // human watcher => watcher view, reveals structure
   await page.waitForTimeout(1200);
 
