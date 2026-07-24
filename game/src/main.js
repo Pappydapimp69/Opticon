@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.7.0";
+const BUILD = "beta-0.8.0";
 
 const app = {
   renderer: null,
@@ -46,6 +46,31 @@ const app = {
   aiThinking: false,
 };
 
+// Persisted across sessions: difficulty pick + audio volume. Small and
+// non-essential, so a read/write failure (private browsing, storage full)
+// degrades to defaults rather than breaking boot.
+const SETTINGS_KEY = "opticon.settings.v1";
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return s && typeof s === "object" ? s : null;
+  } catch {
+    return null;
+  }
+}
+function saveSettings() {
+  try {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ difficulty: app.config.difficulty, volume: app.audio.volume })
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 function boot() {
   const canvas = document.getElementById("gl");
   app.renderer = new Renderer(canvas);
@@ -54,6 +79,12 @@ function boot() {
   app.input = new Input(handleIntent, { onScheme: onSchemeChange });
   app.input.setIntroHandler(dismissIntro);
   app.input.setMenuHandlers(menuNavX, menuNavY, menuSelect, menuBack);
+
+  const saved = loadSettings();
+  if (saved) {
+    if (["easy", "medium", "hard"].includes(saved.difficulty)) app.config.difficulty = saved.difficulty;
+    if (typeof saved.volume === "number") app.audio.volume = Math.max(0, Math.min(1, saved.volume));
+  }
 
   const introEl = document.getElementById("intro");
   if (introEl) introEl.addEventListener("pointerdown", dismissIntro);
@@ -123,6 +154,7 @@ function openMenu() {
   menu.col = ["easy", "medium", "hard"].indexOf(app.config.difficulty);
   if (menu.col < 0) menu.col = 1;
   menuFocusApply();
+  applyVolumeUI(); // pick up a mid-game HUD mute toggle if one happened
 }
 
 function menuElements() {
@@ -197,7 +229,28 @@ function wireMenu() {
       b.classList.add("sel");
       app.config.difficulty = b.getAttribute("data-diff");
       app.audio.play("ui");
+      saveSettings();
     });
+  });
+
+  // Volume: discrete steps (not a slider) so it works identically across
+  // mouse/touch/keyboard/gamepad via the same row/col grid nav as everything
+  // else in this menu — no separate drag-input handling to build or test.
+  document.querySelectorAll("[data-vol]").forEach((b) => {
+    b.addEventListener("click", () => {
+      app.audio.setVolume(Number(b.getAttribute("data-vol")));
+      applyVolumeUI();
+      app.audio.play("ui");
+      saveSettings();
+    });
+  });
+
+  document.getElementById("btnSound")?.addEventListener("click", () => {
+    app.audio.resume();
+    app.audio.toggleMute();
+    applyVolumeUI();
+    if (app.audio.volume > 0) app.audio.play("ui");
+    saveSettings();
   });
 
   // Play type: selecting ALSO starts the game immediately (single click or
@@ -223,6 +276,20 @@ function wireMenu() {
 
   const buildEl = document.getElementById("buildLabel");
   if (buildEl) buildEl.textContent = BUILD;
+
+  applyVolumeUI(); // reflect whatever setting boot() loaded (saved or default)
+}
+
+// Keep the menu's Off/Low/Medium/Full buttons and the HUD mute icon in sync
+// with app.audio.volume, whatever set it (menu click, HUD toggle, or a
+// value restored from localStorage on boot).
+function applyVolumeUI() {
+  const v = app.audio.volume;
+  document.querySelectorAll("[data-vol]").forEach((b) => {
+    b.classList.toggle("sel", Math.abs(Number(b.getAttribute("data-vol")) - v) < 0.001);
+  });
+  const btn = document.getElementById("btnSound");
+  if (btn) btn.textContent = v > 0 ? "🔊" : "🔇";
 }
 
 function startGame(overrides = {}) {

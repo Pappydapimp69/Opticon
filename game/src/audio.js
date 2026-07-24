@@ -10,6 +10,11 @@ const mtof = (m) => A4 * Math.pow(2, (m - 69) / 12);
 export class Audio {
   constructor() {
     this.enabled = true;
+    // Master volume multiplier (0..1), independent of `enabled` — a settings
+    // control the player can revisit mid-game, unlike the gesture-gated
+    // enable/disable above. Persisted by main.js across sessions.
+    this.volume = 1;
+    this._prevVolume = 0.9;
     this.ctx = null;
     this.master = null;
     this.sfxGain = null;
@@ -22,7 +27,7 @@ export class Audio {
     if (!AC) return;
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.enabled ? 0.9 : 0;
+    this.master.gain.value = this.enabled ? 0.9 * this.volume : 0;
     this.master.connect(this.ctx.destination);
     this.sfxGain = this.ctx.createGain();
     this.sfxGain.gain.value = 0.7;
@@ -38,9 +43,29 @@ export class Audio {
   setEnabled(on) {
     this.enabled = on;
     if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(on ? 0.9 : 0, this.ctx.currentTime, 0.05);
+      this.master.gain.setTargetAtTime(on ? 0.9 * this.volume : 0, this.ctx.currentTime, 0.05);
     }
     if (!on) this.stopMusic();
+  }
+
+  // Discrete volume levels (Off/Low/Medium/Full) selected from the menu, or
+  // toggled to/from 0 via the in-HUD mute button (toggleMute below).
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(this.enabled ? 0.9 * this.volume : 0, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  // Returns true if audio is now audible (volume > 0) after the toggle.
+  toggleMute() {
+    if (this.volume > 0) {
+      this._prevVolume = this.volume;
+      this.setVolume(0);
+    } else {
+      this.setVolume(this._prevVolume || 0.9);
+    }
+    return this.volume > 0;
   }
 
   startMusic() {
