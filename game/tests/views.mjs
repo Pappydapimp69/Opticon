@@ -37,9 +37,6 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(200);
   await page.click("#playWatcher"); // human watcher => watcher view, reveals structure
   await page.waitForTimeout(200);
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
-  await page.waitForTimeout(750);
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
   await page.waitForTimeout(1000);
 
   // Force each view and screenshot.

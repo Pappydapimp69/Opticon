@@ -71,9 +71,6 @@ const scenario = process.argv[2] || "prisoner";
   await page.waitForTimeout(200);
   await page.click(startBtn);
   await page.waitForTimeout(200);
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
-  await page.waitForTimeout(750); // > HOLD_DURATION
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
   await page.waitForTimeout(400);
 
   // Capture an early gameplay screenshot (before heavy play) for visual review.

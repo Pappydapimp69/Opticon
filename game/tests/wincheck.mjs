@@ -24,9 +24,6 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(200);
   await page.click("#playPrisoner");
   await page.waitForTimeout(200);
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
-  await page.waitForTimeout(750);
-  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
   await page.waitForTimeout(500);
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
