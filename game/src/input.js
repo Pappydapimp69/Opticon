@@ -14,7 +14,7 @@ export class Input {
     this.padPrev = [];
     this._stickHeld = false;
     this.activeScheme = "keyboard";
-    this.menuHandlers = null; // { nav(dir), select() }
+    this.menuHandlers = null; // { navX(dir), navY(dir), select(), back() }
     this.introHandler = null; // () => void
     this._bindKeyboard();
     // The very first gamepad press (which unlocks the API) should also dismiss
@@ -32,8 +32,11 @@ export class Input {
     this.onScheme(s);
   }
 
-  setMenuHandlers(nav, select) { this.menuHandlers = { nav, select }; }
+  setMenuHandlers(navX, navY, select, back) { this.menuHandlers = { navX, navY, select, back }; }
   setIntroHandler(fn) { this.introHandler = fn; }
+  // Raw held-state (not edge-triggered) — for press-and-hold confirms, where
+  // an intent callback per keydown isn't enough.
+  isHeld(code) { return this.keys.has(code); }
 
   _bindKeyboard() {
     window.addEventListener("keydown", (e) => {
@@ -52,15 +55,20 @@ export class Input {
       e.preventDefault();
       return;
     }
-    // Menu: arrows/WASD move focus, Enter/Space select.
+    // Menu: arrows/WASD move focus on their own axis only, Enter/Space
+    // confirms (or holds, for the final stage — see main.js), Backspace/Esc
+    // goes back a stage. Holding Enter/Space is read directly via isHeld()
+    // for the hold-to-start stage, so no dedicated keydown case is needed
+    // beyond the normal confirm dispatch below.
     if (this.mode === "menu" && this.menuHandlers) {
-      const nav = this.menuHandlers.nav, sel = this.menuHandlers.select;
+      const { navX, navY, select, back } = this.menuHandlers;
       const m = {
-        ArrowUp: () => nav(-1), KeyW: () => nav(-1),
-        ArrowLeft: () => nav(-1), KeyA: () => nav(-1),
-        ArrowDown: () => nav(1), KeyS: () => nav(1),
-        ArrowRight: () => nav(1), KeyD: () => nav(1),
-        Enter: () => sel(), Space: () => sel(),
+        ArrowUp: () => navY(-1), KeyW: () => navY(-1),
+        ArrowDown: () => navY(1), KeyS: () => navY(1),
+        ArrowLeft: () => navX(-1), KeyA: () => navX(-1),
+        ArrowRight: () => navX(1), KeyD: () => navX(1),
+        Enter: () => select(), Space: () => select(),
+        Backspace: () => back(), Escape: () => back(),
       };
       if (m[e.code]) { e.preventDefault(); m[e.code](); }
       return;
@@ -153,14 +161,21 @@ export class Input {
     }
 
     if (this.mode === "menu" && this.menuHandlers) {
-      const { nav, select } = this.menuHandlers;
-      if (edge(12)) nav(-1); // dpad up
-      if (edge(13)) nav(1);  // dpad down
-      if (edge(14)) nav(-1); // dpad left
-      if (edge(15)) nav(1);  // dpad right
-      if (stickDir === 0 || stickDir === 3) nav(-1);
-      if (stickDir === 1 || stickDir === 2) nav(1);
-      if (edge(0) || edge(9)) select(); // A / Start
+      // Up/down and left/right are kept on SEPARATE axes end-to-end (this was
+      // the root cause of "any button skips to the game": up/down/left/right
+      // used to share one flat list, so any direction could wander onto a
+      // play button, and A/Start confirmed it instantly).
+      const { navX, navY, select, back } = this.menuHandlers;
+      if (edge(12)) navY(-1); // dpad up
+      if (edge(13)) navY(1);  // dpad down
+      if (edge(14)) navX(-1); // dpad left
+      if (edge(15)) navX(1);  // dpad right
+      if (stickDir === 0) navY(-1);
+      if (stickDir === 2) navY(1);
+      if (stickDir === 3) navX(-1);
+      if (stickDir === 1) navX(1);
+      if (edge(0) || edge(9)) select(); // A / Start — menuSelect() itself
+      if (edge(1)) back();               // B — go back a stage
       this.padPrev = pressed;
       return;
     }

@@ -65,10 +65,16 @@ const scenario = process.argv[2] || "prisoner";
   // Ensure build label loaded (module ran).
   const build = await page.$eval("#buildLabel", (el) => el.textContent).catch(() => null);
 
-  // Start a game.
+  // Start a game via the staged menu: difficulty -> play type -> hold to start.
   const startBtn = scenario === "watcher" ? "#playWatcher" : scenario === "hotseat" ? "#playHotseat" : "#playPrisoner";
+  await page.click('[data-diff="medium"]');
+  await page.waitForTimeout(200);
   await page.click(startBtn);
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+  await page.waitForTimeout(750); // > HOLD_DURATION
+  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
+  await page.waitForTimeout(400);
 
   // Capture an early gameplay screenshot (before heavy play) for visual review.
   const shotPlay = path.join(ROOT, "tests", `play-${scenario}.png`);

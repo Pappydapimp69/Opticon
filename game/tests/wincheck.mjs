@@ -20,7 +20,13 @@ const server = http.createServer((req, res) => {
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.keyboard.press("Enter"); await page.waitForTimeout(700);
+  await page.click('[data-diff="medium"]');
+  await page.waitForTimeout(200);
   await page.click("#playPrisoner");
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+  await page.waitForTimeout(750);
+  await page.evaluate(() => document.getElementById("holdStartBtn").dispatchEvent(new MouseEvent("mouseup", { bubbles: true })));
   await page.waitForTimeout(500);
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
@@ -45,14 +51,21 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(200);
     await page.keyboard.press("Space"); // commit — actually steps onto the exit
   }
-  await page.waitForTimeout(1200);
-
-  const result = await page.evaluate(() => {
-    const g = window.__opticon.game;
-    const overlay = document.getElementById("overlay");
-    const title = document.getElementById("overlayTitle").textContent;
-    return { status: g.status, winner: g.winner, overlayVisible: !overlay.classList.contains("hidden"), title };
-  });
+  // Poll for the overlay rather than sleeping a guessed duration — headless
+  // rAF can be throttled (sparse frames), and the walk-animation + deferred
+  // game-over take longer in wall-clock terms there than on a real, visible
+  // tab. Poll up to a generous budget instead of assuming a fixed delay.
+  let result = null;
+  for (let i = 0; i < 40; i++) {
+    result = await page.evaluate(() => {
+      const g = window.__opticon.game;
+      const overlay = document.getElementById("overlay");
+      const title = document.getElementById("overlayTitle").textContent;
+      return { status: g.status, winner: g.winner, overlayVisible: !overlay.classList.contains("hidden"), title };
+    });
+    if (result.overlayVisible) break;
+    await page.waitForTimeout(150);
+  }
   await page.screenshot({ path: path.join(ROOT, "tests", "win-escape.png") });
   console.log("RESULT:", JSON.stringify(result), "errors:", errors.length);
   await browser.close(); server.close();

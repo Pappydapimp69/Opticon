@@ -38,11 +38,16 @@ export class UI {
     this.el.overlay.classList.add("hidden");
   }
 
-  updateHud(game, viewMode, humanRole) {
+  // `showWatcherInfo`: only true for whoever is legitimately "being" the
+  // Watcher right now. The prisoner must never learn the true gaze this way
+  // either — that's the entire point of the asymmetry.
+  updateHud(game, viewMode, humanRole, showWatcherInfo) {
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
     this.el.turn.textContent = game.turn;
     this.el.turn.className = "val " + (game.turn === "Watcher" ? "watcher" : "prisoner");
-    this.el.facing.textContent = DIRS[game.watcher.facing] + (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "");
+    this.el.facing.textContent = showWatcherInfo
+      ? DIRS[game.watcher.facing] + (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")
+      : "?";
     this.el.mp.textContent = "●".repeat(Math.max(0, p.mp)) + "○".repeat(Math.max(0, p.mpMax ? p.mpMax - p.mp : 3 - p.mp));
     this.el.round.textContent = game.round;
     this.el.view.textContent = viewMode;

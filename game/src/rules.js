@@ -32,6 +32,10 @@ export function createGame(map, opts = {}) {
       alive: true,
       escaped: false,
       openedDoors: new Set(),
+      // Tiles where THIS prisoner made noise this turn — their own private
+      // "I heard that" feedback (unlike game.noise, the Watcher's shared
+      // multi-turn intel). Reset at the start of each of their turns.
+      selfNoise: [],
     })
   );
 
@@ -232,6 +236,7 @@ export function moveActivePrisoner(game, dir) {
   // Glass always makes immediate noise at the landing tile.
   if (o === OBJ.GLASS) {
     addNoise(game, nx, ny, "glass");
+    pushSelfNoise(p, nx, ny);
     event = "glass";
     logMsg(game, `Glass crunches under the Prisoner's step.`);
   }
@@ -255,6 +260,7 @@ export function endPrisonerTurn(game) {
   // Moving 2+ tiles this turn reveals the tile the prisoner STARTED on.
   if (dist >= 2) {
     addNoise(game, p.startTurnPos.x, p.startTurnPos.y, "movement");
+    pushSelfNoise(p, p.startTurnPos.x, p.startTurnPos.y);
     logMsg(game, `Movement noise heard near (${p.startTurnPos.x}, ${p.startTurnPos.y}).`);
   }
   game.turn = "Watcher";
@@ -326,6 +332,7 @@ export function endWatcherTurn(game) {
   const p = game.prisoners[next];
   p.mp = MP_PER_TURN;
   p.startTurnPos = { x: p.x, y: p.y };
+  p.selfNoise = []; // "erased when the Watcher's turn begins" — gone by next turn
   game.turn = "Prisoner";
   game.round += 1;
   return { ok: true };
@@ -349,6 +356,12 @@ function nextActivePrisoner(game) {
 function addNoise(game, x, y, source) {
   game.noise = game.noise.filter((n) => !(n.x === x && n.y === y));
   game.noise.push({ x, y, ttl: NOISE_TTL, source });
+}
+
+function pushSelfNoise(prisoner, x, y) {
+  if (!prisoner.selfNoise.some((n) => n.x === x && n.y === y)) {
+    prisoner.selfNoise.push({ x, y });
+  }
 }
 
 export function noiseAt(game, x, y) {
