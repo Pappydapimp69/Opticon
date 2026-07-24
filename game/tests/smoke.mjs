@@ -58,6 +58,9 @@ const scenario = process.argv[2] || "prisoner";
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
+  // Dismiss the intro splash (unlocks audio, reveals the menu).
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(700);
 
   // Ensure build label loaded (module ran).
   const build = await page.$eval("#buildLabel", (el) => el.textContent).catch(() => null);

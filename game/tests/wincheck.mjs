@@ -19,6 +19,7 @@ const server = http.createServer((req, res) => {
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
+  await page.keyboard.press("Enter"); await page.waitForTimeout(700);
   await page.click("#playPrisoner");
   await page.waitForTimeout(500);
 

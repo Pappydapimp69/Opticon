@@ -11,8 +11,22 @@
 <body>
   <canvas id="gl"></canvas>
 
+  <!-- INTRO SPLASH (also the audio + gamepad unlock gesture — Chrome gates both) -->
+  <div id="intro" class="screen intro">
+    <div class="intro-inner">
+      <div class="eye" aria-hidden="true">
+        <div class="iris"><div class="pupil"></div></div>
+        <div class="lid top"></div>
+        <div class="lid bottom"></div>
+      </div>
+      <h1 class="logo intro-logo">OPTICON</h1>
+      <p class="intro-sub">A game of the all-seeing eye</p>
+      <p class="intro-prompt" id="introPrompt">Press any key &nbsp;·&nbsp; Tap &nbsp;·&nbsp; or a controller button</p>
+    </div>
+  </div>
+
   <!-- MAIN MENU -->
-  <div id="menu" class="screen">
+  <div id="menu" class="screen hidden">
     <div class="menu-card">
       <h1 class="logo">OPTICON</h1>
       <p class="tagline">A game of the all-seeing eye. Slip past the Watcher — or become it.</p>

@@ -19,7 +19,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.1.0";
+const BUILD = "beta-0.2.0";
 
 const app = {
   renderer: null,
@@ -44,7 +44,12 @@ function boot() {
   app.renderer = new Renderer(canvas);
   app.audio = new Audio();
   app.ui = new UI(document.body);
-  app.input = new Input(handleIntent);
+  app.input = new Input(handleIntent, { onScheme: onSchemeChange });
+  app.input.setIntroHandler(dismissIntro);
+  app.input.setMenuHandlers(menuNav, menuSelect);
+
+  const introEl = document.getElementById("intro");
+  if (introEl) introEl.addEventListener("pointerdown", dismissIntro);
 
   // Touch buttons + canvas orbit.
   const touchRoot = document.getElementById("touchControls");
@@ -61,8 +66,78 @@ function boot() {
   );
 
   wireMenu();
-  app.ui.showMenu();
+  showIntro();
   loop(performance.now());
+}
+
+// ---- Intro splash + menu navigation --------------------------------------
+
+const menu = { els: [], idx: 0 };
+let introDone = false;
+
+function showIntro() {
+  const intro = document.getElementById("intro");
+  if (intro) intro.classList.remove("hidden", "fadeout");
+  app.input.mode = "intro";
+}
+
+// First user gesture: unlocks the Web Audio gate AND (if it's a controller
+// button) the Gamepad gate — the two are independent (Brain dog#E47).
+function dismissIntro() {
+  if (introDone) return;
+  introDone = true;
+  app.audio.resume();
+  app.audio.startMusic();
+  app.audio.play("start");
+  const intro = document.getElementById("intro");
+  if (intro) {
+    intro.classList.add("fadeout");
+    setTimeout(() => intro.classList.add("hidden"), 520);
+  }
+  openMenu();
+}
+
+function openMenu() {
+  app.running = false;
+  app.ui.showMenu();
+  app.input.mode = "menu";
+  buildMenuFocus();
+}
+
+function buildMenuFocus() {
+  menu.els = [
+    ...document.querySelectorAll("#menu [data-diff]"),
+    document.getElementById("playPrisoner"),
+    document.getElementById("playWatcher"),
+    document.getElementById("playHotseat"),
+  ].filter(Boolean);
+  // Center the default on the primary action, not an edge (Brain: focus lever).
+  menu.idx = Math.max(0, menu.els.indexOf(document.getElementById("playPrisoner")));
+  menuFocusApply();
+}
+
+function menuFocusApply() {
+  menu.els.forEach((el, i) => el.classList.toggle("gpfocus", i === menu.idx));
+  const cur = menu.els[menu.idx];
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+}
+
+function menuNav(dir) {
+  if (!menu.els.length) return;
+  menu.idx = (menu.idx + dir + menu.els.length) % menu.els.length;
+  menuFocusApply();
+  app.audio.play("ui");
+}
+
+function menuSelect() {
+  const cur = menu.els[menu.idx];
+  if (cur) cur.click();
+}
+
+// Active input scheme changed → refresh device-appropriate hints.
+function onSchemeChange(scheme) {
+  document.body.setAttribute("data-scheme", scheme);
+  if (app.ui) app.ui.hint(hintFor());
 }
 
 function wireMenu() {
@@ -74,7 +149,7 @@ function wireMenu() {
   bind("playWatcher", () => startGame({ humanRole: "Watcher", mode: "single" }));
   bind("playHotseat", () => startGame({ mode: "hotseat", humanRole: "Prisoner" }));
   bind("btnRestart", () => startGame(app.config));
-  bind("btnMenu", () => { app.running = false; app.ui.showMenu(); app.audio.stopDrone(); });
+  bind("btnMenu", () => openMenu());
 
   // Difficulty selector.
   document.querySelectorAll("[data-diff]").forEach((b) => {
@@ -103,9 +178,10 @@ function startGame(overrides = {}) {
   app.renderer.setViewMode(app.viewMode);
   app.running = true;
   app.aiThinking = false;
+  app.input.mode = "game";
 
   app.audio.resume();
-  app.audio.startDrone();
+  app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
   app.ui.updateHud(app.game, app.viewMode, humanLabel());
   app.ui.renderLog(app.game);
@@ -123,13 +199,26 @@ function humanLabel() {
   return app.config.humanRole;
 }
 
+// Device-adaptive control hints (Brain: device-adaptive-ui / show-the-active
+// scheme). Labels use words, not glyphs, so nobody presses blind (test#E3).
 function hintFor() {
   const g = app.game;
   if (!g) return "";
-  if (g.turn === "Prisoner") {
-    return "Move with WASD / arrows. 1 step = quiet. 2+ steps reveal where you started. Reach the green gate.";
+  const scheme = app.input ? app.input.activeScheme : "keyboard";
+  const prisoner = g.turn === "Prisoner";
+  if (scheme === "gamepad") {
+    return prisoner
+      ? "Left stick / D-pad: move (1 step quiet, 2+ noisy)  ·  A: end turn  ·  Start: change view"
+      : "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  A: scan & end turn  ·  Start: change view";
   }
-  return "Watcher: Q/E rotate 90°, 1-4 bluff a direction, Space to scan & end turn.";
+  if (scheme === "touch") {
+    return prisoner
+      ? "Tap the arrows to move (1 quiet, 2+ noisy)  ·  End: end turn  ·  View: change camera"
+      : "Rotate / bluff with the buttons  ·  Scan: end turn  ·  View: change camera";
+  }
+  return prisoner
+    ? "WASD / arrows: move (1 step quiet, 2+ reveal your start)  ·  Space: end turn  ·  V: view  ·  reach the green gate"
+    : "Q / E: rotate 90°  ·  1-4: bluff a direction  ·  Space: scan & end turn  ·  V: view";
 }
 
 // ---- Intent handling -----------------------------------------------------
@@ -316,7 +405,6 @@ function checkOver() {
   const g = app.game;
   if (g && isOver(g)) {
     app.running = false;
-    app.audio.stopDrone();
     if (g.winner === "Prisoner") app.audio.play("escape");
     else app.audio.play("caught");
     setTimeout(() => app.ui.gameOver(g), 700);
