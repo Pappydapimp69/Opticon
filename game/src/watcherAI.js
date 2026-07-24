@@ -113,7 +113,7 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
   }
 
   // Commit the scan (captures an exposed prisoner in the true wedge).
-  const scan = watcherScan(game);
+  const scan = watcherScan(game, difficulty);
   actions.push({ type: "scan", caught: scan.caught ? scan.caught.id : null });
 
   // End the turn (ages noise, hands back to prisoner).

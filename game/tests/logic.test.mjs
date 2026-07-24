@@ -175,6 +175,69 @@ section("capture logic");
   ok(g.status === "captured" && g.winner === "Watcher", "capture ends game for Watcher");
 }
 
+// --- Tiered capture-exposure by difficulty (resolves OPT-1) ---------------
+section("tiered capture-exposure by difficulty");
+{
+  // Unlit prisoner standing exactly ON a noise tile: medium/hard catch,
+  // easy forgives (easy requires actual light).
+  function scenario(difficulty) {
+    const m = generateMap(4);
+    const g = createGame(m);
+    const p = g.prisoners[0];
+    const c = m.center;
+    p.x = c.x;
+    p.y = c.y - (m.cfg.towerRadius + m.cfg.moatThickness + 2);
+    g.map.lights = []; // isolate: exposure must come from noise alone, not light
+    g.noise.push({ x: p.x, y: p.y, ttl: 2, source: "test" });
+    g.turn = "Watcher";
+    g.round = 2;
+    g.watcher.facing = 0;
+    return watcherScan(g, difficulty);
+  }
+  ok(!scenario("easy").caught, "easy: unlit noise-tile prisoner is NOT caught");
+  ok(scenario("medium").caught, "medium: unlit noise-tile prisoner IS caught (unchanged default)");
+  ok(scenario("hard").caught, "hard: unlit noise-tile prisoner IS caught");
+
+  // Unlit prisoner ADJACENT (not on) a noise tile: only hard catches.
+  function adjacentScenario(difficulty) {
+    const m = generateMap(4);
+    const g = createGame(m);
+    const p = g.prisoners[0];
+    const c = m.center;
+    p.x = c.x;
+    p.y = c.y - (m.cfg.towerRadius + m.cfg.moatThickness + 2);
+    g.map.lights = []; // isolate: exposure must come from noise alone, not light
+    g.noise.push({ x: p.x + 1, y: p.y, ttl: 2, source: "test" }); // adjacent, not on
+    g.turn = "Watcher";
+    g.round = 2;
+    g.watcher.facing = 0;
+    return watcherScan(g, difficulty);
+  }
+  ok(!adjacentScenario("easy").caught, "easy: adjacent noise does not catch");
+  ok(!adjacentScenario("medium").caught, "medium: adjacent noise does not catch (exact tile only)");
+  ok(adjacentScenario("hard").caught, "hard: adjacent noise DOES catch (within 1 tile)");
+
+  // Lit prisoner with no noise at all: every difficulty catches (light alone
+  // always exposes, at every tier).
+  function litScenario(difficulty) {
+    const m = generateMap(4);
+    const g = createGame(m);
+    const p = g.prisoners[0];
+    const c = m.center;
+    p.x = c.x;
+    p.y = c.y - (m.cfg.towerRadius + m.cfg.moatThickness + 2);
+    g.turn = "Watcher";
+    g.round = 2;
+    g.watcher.facing = 0;
+    // Force-light the prisoner's tile via a synthetic ON light at their spot.
+    g.map.lights.push({ x: p.x, y: p.y, group: 9999, radius: 0 });
+    g.lightState[9999] = true;
+    return watcherScan(g, difficulty);
+  }
+  ok(litScenario("easy").caught, "easy: lit prisoner (no noise) is still caught");
+  ok(litScenario("hard").caught, "hard: lit prisoner (no noise) is still caught");
+}
+
 // --- Escape: reaching exit wins -------------------------------------------
 section("escape win");
 {

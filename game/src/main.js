@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.5.0";
+const BUILD = "beta-0.6.0";
 
 const app = {
   renderer: null,
@@ -463,7 +463,7 @@ function handleWatcherIntent(intent, arg) {
     if (setBluff(g, arg).ok) app.audio.play("bluff");
   } else if (intent === "endTurn") {
     // Scan (commit), then end turn.
-    const scan = watcherScan(g);
+    const scan = watcherScan(g, app.config.difficulty);
     app.audio.play("scan");
     if (scan.caught) { app.audio.play("caught"); app.ui.banner("CAPTURED!", "bad"); }
     checkOver();
