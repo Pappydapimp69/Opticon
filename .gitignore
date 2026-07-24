@@ -1,0 +1,8 @@
+# Brain local store (per-project private mirror — never commit)
+.brain/
+
+# Headless test artifacts (screenshots regenerated on demand)
+game/tests/shot-*.png
+game/tests/play-*.png
+game/tests/view-*.png
+game/tests/win-*.png
