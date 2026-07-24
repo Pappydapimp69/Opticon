@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.8.0";
+const BUILD = "beta-0.9.0";
 
 const app = {
   renderer: null,
@@ -652,7 +652,7 @@ function checkOver() {
     app.running = false;
     if (g.winner === "Prisoner") app.audio.play("escape");
     else app.audio.play("caught");
-    setTimeout(() => app.ui.gameOver(g), 700);
+    setTimeout(() => app.ui.gameOver(g, { difficulty: app.config.difficulty }), 700);
   }
 }
 

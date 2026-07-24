@@ -78,14 +78,17 @@ export class UI {
     if (this.el.hint) this.el.hint.textContent = text || "";
   }
 
-  gameOver(game) {
+  gameOver(game, meta = {}) {
     const won = game.winner === "Prisoner";
     this.el.overlay.classList.remove("hidden");
     this.el.overlayTitle.textContent = won ? "ESCAPED" : "CAPTURED";
     this.el.overlayTitle.className = won ? "escaped" : "captured";
-    this.el.overlayText.textContent = won
+    const flavor = won
       ? "You slipped past the eye and reached the gate. Freedom."
       : "The Watcher's gaze found you. The panopticon holds.";
+    const roundWord = game.round === 1 ? "round" : "rounds";
+    const stats = `${flavor} (${game.round} ${roundWord}${meta.difficulty ? `, ${meta.difficulty}` : ""})`;
+    this.el.overlayText.textContent = stats;
   }
 }
 
