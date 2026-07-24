@@ -1,7 +1,7 @@
 // main.js — Opticon 3D entry point. Wires map + rules + AI + render + input + UI
 // into a playable game: menu → play (single-player vs AI, or hotseat) → game over.
 
-import { generateMap } from "./map.js";
+import { generateMap, DIR_VEC, OBJ } from "./map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -11,6 +11,9 @@ import {
   watcherScan,
   endWatcherTurn,
   isOver,
+  objAt,
+  isWalkable,
+  isDoorOpen,
 } from "./rules.js";
 import { playWatcherTurn } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
@@ -19,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.2.0";
+const BUILD = "beta-0.3.0";
 
 const app = {
   renderer: null,
@@ -27,6 +30,10 @@ const app = {
   audio: null,
   ui: null,
   game: null,
+  // Staged (uncommitted) prisoner path: [{x,y,dir}]. Presentation-only until
+  // committed — no sim state changes until the player confirms. Cleared on
+  // commit, on a fresh game, and whenever it isn't the Prisoner's turn.
+  stagedPath: [],
   config: {
     humanRole: "Prisoner", // "Prisoner" | "Watcher"
     mode: "single", // "single" | "hotseat"
@@ -138,6 +145,7 @@ function menuSelect() {
 function onSchemeChange(scheme) {
   document.body.setAttribute("data-scheme", scheme);
   if (app.ui) app.ui.hint(hintFor());
+  updateCommitButton();
 }
 
 function wireMenu() {
@@ -167,6 +175,7 @@ function wireMenu() {
 
 function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
+  app.stagedPath = [];
   // Fresh seed each game for variety, but reproducible within a game.
   app.config.seed = (Math.floor(Math.random() * 1e9) >>> 0) || 1;
   const map = generateMap(app.config.seed);
@@ -186,6 +195,7 @@ function startGame(overrides = {}) {
   app.ui.updateHud(app.game, app.viewMode, humanLabel());
   app.ui.renderLog(app.game);
   app.ui.hint(hintFor());
+  updateCommitButton();
 
   // If human is Watcher, the AI prisoner acts first each round.
   if (app.config.humanRole === "Watcher" && app.config.mode === "single") {
@@ -201,24 +211,46 @@ function humanLabel() {
 
 // Device-adaptive control hints (Brain: device-adaptive-ui / show-the-active
 // scheme). Labels use words, not glyphs, so nobody presses blind (test#E3).
+function updateCommitButton() {
+  const btn = document.getElementById("commitBtn");
+  if (!btn) return;
+  const g = app.game;
+  if (!g) return;
+  if (g.turn === "Prisoner") {
+    btn.textContent = app.stagedPath.length ? "Commit Move" : "End Turn";
+  } else {
+    btn.textContent = "Scan & End Turn";
+  }
+}
+
 function hintFor() {
   const g = app.game;
   if (!g) return "";
   const scheme = app.input ? app.input.activeScheme : "keyboard";
   const prisoner = g.turn === "Prisoner";
+  const staged = app.stagedPath.length > 0;
   if (scheme === "gamepad") {
-    return prisoner
-      ? "Left stick / D-pad: move (1 step quiet, 2+ noisy)  ·  A: end turn  ·  Start: change view"
-      : "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  A: scan & end turn  ·  Start: change view";
+    if (prisoner) {
+      return staged
+        ? "Stick / D-pad: extend or undo the path  ·  A: commit the move  ·  Start: change view"
+        : "Left stick / D-pad: plan a path (traced, not moved yet)  ·  A: end turn  ·  Start: change view";
+    }
+    return "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  A: scan & end turn  ·  Start: change view";
   }
   if (scheme === "touch") {
-    return prisoner
-      ? "Tap the arrows to move (1 quiet, 2+ noisy)  ·  End: end turn  ·  View: change camera"
-      : "Rotate / bluff with the buttons  ·  Scan: end turn  ·  View: change camera";
+    if (prisoner) {
+      return staged
+        ? "Tap arrows to extend/undo the path  ·  Commit: move for real  ·  View: change camera"
+        : "Tap arrows to plan a path (traced, not moved yet)  ·  End: end turn  ·  View: change camera";
+    }
+    return "Rotate / bluff with the buttons  ·  Scan: end turn  ·  View: change camera";
   }
-  return prisoner
-    ? "WASD / arrows: move (1 step quiet, 2+ reveal your start)  ·  Space: end turn  ·  V: view  ·  reach the green gate"
-    : "Q / E: rotate 90°  ·  1-4: bluff a direction  ·  Space: scan & end turn  ·  V: view";
+  if (prisoner) {
+    return staged
+      ? "WASD / arrows: extend or undo the path  ·  Space: commit the move  ·  V: view"
+      : "WASD / arrows: plan a path (traced on the floor, not moved yet)  ·  Space: end turn  ·  V: view  ·  reach the green gate";
+  }
+  return "Q / E: rotate 90°  ·  1-4: bluff a direction  ·  Space: scan & end turn  ·  V: view";
 }
 
 // ---- Intent handling -----------------------------------------------------
@@ -249,23 +281,95 @@ function humanControlsWatcher() {
 
 function handlePrisonerIntent(intent, arg) {
   if (!humanControlsPrisoner()) return; // AI prisoner; ignore input
-  const g = app.game;
   if (intent === "move") {
-    const r = moveActivePrisoner(g, arg);
-    if (r.ok) {
-      if (r.event === "glass") app.audio.play("glass");
-      else if (r.event === "door-open") app.audio.play("door");
-      else if (r.event === "switch") app.audio.play("switch");
-      else if (r.event === "exit") { app.audio.play("escape"); app.ui.banner("ESCAPED!", "good"); }
-      else app.audio.play("move");
-      if (r.event === "glass") app.renderer.triggerPing(r.x, r.y);
-      checkOver();
-    } else if (r.reason === "blocked") {
-      app.audio.play("blocked");
-    }
+    stagePathExtend(arg);
   } else if (intent === "endTurn") {
-    doEndPrisonerTurn();
+    // The confirm button is overloaded: commit a staged path if one exists,
+    // otherwise it means "I have nothing left to plan — end my turn."
+    if (app.stagedPath.length) commitStagedPath();
+    else doEndPrisonerTurn();
   }
+}
+
+// ---- Staged movement: nothing moves for real until the player commits ----
+// (Brain telegraph#E6: a cosmetic/preview stays presentation-only; only what
+// has real consequence touches authoritative state — here, the preview never
+// calls moveActivePrisoner until commit.)
+
+function resetStagedPath() {
+  if (app.stagedPath.length) app.stagedPath = [];
+}
+
+// Extend or retract the staged path by one tile in `dir`. Doors and switches
+// don't relocate the character, so they resolve immediately — but only when
+// adjacent to the prisoner's REAL position (path empty); previewing "through"
+// an unopened door/switch mid-path isn't meaningful, since global door state
+// can't be safely speculated on.
+function stagePathExtend(dir) {
+  const g = app.game;
+  if (!g || g.turn !== "Prisoner") return;
+  const p = g.prisoners[g.activePrisoner];
+  const path = app.stagedPath;
+
+  // Opposite of the last staged step: undo it (planning backtrack).
+  if (path.length && path[path.length - 1].dir === (dir + 2) % 4) {
+    path.pop();
+    app.audio.play("move");
+    app.ui.hint(hintFor());
+  updateCommitButton();
+    return;
+  }
+
+  const from = path.length ? path[path.length - 1] : { x: p.x, y: p.y };
+  const { dx, dy } = DIR_VEC[dir];
+  const nx = from.x + dx;
+  const ny = from.y + dy;
+  const obj = objAt(g, nx, ny);
+
+  if (obj === OBJ.SWITCH || (obj === OBJ.DOOR && !isDoorOpen(g, nx, ny))) {
+    if (path.length === 0) {
+      const r = moveActivePrisoner(g, dir);
+      if (r.ok) {
+        if (r.event === "door-open") app.audio.play("door");
+        else if (r.event === "switch") app.audio.play("switch");
+        app.ui.updateHud(g, app.viewMode, humanLabel());
+        app.ui.renderLog(g);
+      }
+    } else {
+      app.audio.play("blocked"); // can't preview past an unresolved door/switch
+    }
+    return;
+  }
+
+  if (path.length >= p.mp) { app.audio.play("blocked"); return; }
+  if (!isWalkable(g, nx, ny)) { app.audio.play("blocked"); return; }
+
+  path.push({ x: nx, y: ny, dir });
+  app.audio.play("move");
+  app.ui.hint(hintFor());
+  updateCommitButton();
+}
+
+// Replay the staged steps as real moves, in order — the same events/audio the
+// old per-keypress code produced, just batched behind one confirm press.
+function commitStagedPath() {
+  const g = app.game;
+  const path = app.stagedPath;
+  if (!g || !path.length) return;
+  for (const step of path) {
+    if (isOver(g)) break;
+    const r = moveActivePrisoner(g, step.dir);
+    if (!r.ok) break; // defensive; steps were pre-validated as walkable
+    if (r.event === "glass") { app.audio.play("glass"); app.renderer.triggerPing(r.x, r.y); }
+    else if (r.event === "exit") { app.audio.play("escape"); app.ui.banner("ESCAPED!", "good"); }
+    else app.audio.play("move");
+  }
+  app.stagedPath = [];
+  checkOver();
+  app.ui.updateHud(g, app.viewMode, humanLabel());
+  app.ui.renderLog(g);
+  app.ui.hint(hintFor());
+  updateCommitButton();
 }
 
 function doEndPrisonerTurn() {
@@ -285,6 +389,7 @@ function doEndPrisonerTurn() {
     if (app.config.mode === "hotseat") setView("watcher");
     app.ui.banner("Watcher's turn", "watcher");
     app.ui.hint(hintFor());
+  updateCommitButton();
   } else {
     // AI watcher.
     scheduleAiWatcher();
@@ -315,6 +420,7 @@ function handleWatcherIntent(intent, arg) {
       scheduleAiPrisoner();
     }
     app.ui.hint(hintFor());
+  updateCommitButton();
   }
 }
 
@@ -342,6 +448,7 @@ function scheduleAiWatcher() {
     app.ui.renderLog(g);
     if (!isOver(g)) app.ui.banner("Your move", "prisoner");
     app.ui.hint(hintFor());
+  updateCommitButton();
   }, 750);
 }
 
@@ -360,6 +467,7 @@ function scheduleAiPrisoner() {
     app.ui.renderLog(g);
     if (!isOver(g)) app.ui.banner("Watcher's turn — your move", "watcher");
     app.ui.hint(hintFor());
+  updateCommitButton();
   }, 650);
 }
 
@@ -417,8 +525,13 @@ function loop(t) {
   const dt = Math.min(0.05, (t - app.lastT) / 1000 || 0);
   app.lastT = t;
   if (app.input) app.input.pollGamepad();
+  // Safety net: a staged path only makes sense during the Prisoner's own turn.
+  if (app.game && app.game.turn !== "Prisoner") resetStagedPath();
   if (app.renderer && app.game) {
-    app.renderer.update(app.game, dt, { showPrisoner: shouldShowPrisoner() });
+    app.renderer.update(app.game, dt, {
+      showPrisoner: shouldShowPrisoner(),
+      stagedPath: app.stagedPath,
+    });
   } else if (app.renderer) {
     app.renderer.renderOnce();
   }

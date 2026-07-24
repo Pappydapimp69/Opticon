@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.3.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -108,7 +108,7 @@
         <button class="tbtn" data-intent="rotate" data-arg="1">⟳</button>
       </div>
       <div class="right-controls">
-        <button class="actbtn" data-intent="endTurn">End / Scan</button>
+        <button id="commitBtn" class="actbtn" data-intent="endTurn">End / Scan</button>
         <button class="viewbtn" data-intent="cycleView">◳ View</button>
       </div>
     </div>
@@ -126,6 +126,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js"></script>
+  <script type="module" src="src/main.js?v=beta-0.3.0"></script>
 </body>
 </html>

@@ -26,6 +26,7 @@ const COLORS = {
   gaze: 0x4a8ef7,
   bluff: 0xf7c14a,
   noise: 0xff5757,
+  pathPreview: 0xf5e6a8,
 };
 
 // World scale: one grid tile == TILE_W world units.
@@ -346,6 +347,53 @@ export class Renderer {
     this.groups.noiseMarks = noiseGroup;
     this.scene.add(noiseGroup);
 
+    // --- Staged movement path preview: a trace over dark tiles, not a light
+    // source. Pool sized to MP_PER_TURN; markers + connecting line rebuilt
+    // only when the staged path actually changes (cheap either way at 3 tiles).
+    this.pathMarkers = [];
+    const pathGroup = new THREE.Group();
+    for (let i = 0; i < 6; i++) {
+      const group = new THREE.Group();
+      const fill = new THREE.Mesh(
+        new THREE.CircleGeometry(0.34, 24),
+        new THREE.MeshBasicMaterial({
+          color: COLORS.pathPreview,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.32, 0.46, 28),
+        new THREE.MeshBasicMaterial({
+          color: COLORS.pathPreview,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      fill.rotation.x = -Math.PI / 2;
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.002;
+      group.add(fill);
+      group.add(ring);
+      group.visible = false;
+      pathGroup.add(group);
+      this.pathMarkers.push({ group, fill, ring });
+    }
+    const pathLine = new THREE.Line(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: COLORS.pathPreview, transparent: true, opacity: 0.85 })
+    );
+    pathLine.visible = false;
+    pathGroup.add(pathLine);
+    this.pathLine = pathLine;
+    this.groups.pathPreview = pathGroup;
+    this.scene.add(pathGroup);
+    this._pathSig = "";
+
     // Reach radius for gaze wedge = whole play area.
     this.playRadius =
       (map.cfg.towerRadius + map.cfg.moatThickness + map.cfg.ringCount * map.cfg.ringThickness) * TILE_W;
@@ -489,6 +537,10 @@ export class Renderer {
     // FoV darkening (prisoner view only): dim floor tiles outside FoV.
     this.applyFoV(game, p, this.viewMode === "prisoner");
 
+    // Staged path preview (prisoner-view affordance; visible even on dark
+    // unlit tiles by design — it traces, it doesn't reveal or emit light).
+    this.updatePathPreview(p, opts.stagedPath || []);
+
     // Camera behaviour.
     this.updateCamera(game, p, dt, opts);
 
@@ -509,6 +561,52 @@ export class Renderer {
     // Wedge default points North (-Z). Rotate to dir.
     const rot = [0, -Math.PI / 2, Math.PI, Math.PI / 2][dir];
     mesh.rotation.set(0, rot, 0);
+  }
+
+  // Trace a staged (uncommitted) prisoner path: a ring per tile + a thin line
+  // through them, warm and distinct from noise (red) / gaze (blue) / bluff
+  // (amber). Purely decorative — MeshBasicMaterial, no PointLight, no effect
+  // on isLit()/FoV — so it never "lights" a dark tile, only marks it.
+  updatePathPreview(prisoner, path) {
+    const sig = path.map((s) => `${s.x},${s.y}`).join("|");
+    if (sig === this._pathSig) {
+      // Unchanged: just keep the tip pulsing for legibility against a dark floor.
+      if (path.length) {
+        const tip = this.pathMarkers[path.length - 1];
+        const pulse = 0.6 + 0.3 * Math.sin(this.time * 6);
+        tip.ring.material.opacity = pulse;
+        tip.fill.material.opacity = pulse * 0.35;
+      }
+      return;
+    }
+    this._pathSig = sig;
+
+    this.pathMarkers.forEach((m) => {
+      m.group.visible = false;
+      m.ring.material.opacity = 0;
+      m.fill.material.opacity = 0;
+    });
+    if (!path.length) {
+      this.pathLine.visible = false;
+      return;
+    }
+
+    const pts = [new THREE.Vector3(this.worldX(prisoner.x), 0.06, this.worldZ(prisoner.y))];
+    path.forEach((step, i) => {
+      const m = this.pathMarkers[i];
+      if (m) {
+        const isTip = i === path.length - 1;
+        m.group.visible = true;
+        m.group.position.set(this.worldX(step.x), 0.06, this.worldZ(step.y));
+        m.ring.material.opacity = isTip ? 0.9 : 0.55 + 0.1 * i;
+        m.fill.material.opacity = isTip ? 0.3 : 0.15 + 0.05 * i;
+      }
+      pts.push(new THREE.Vector3(this.worldX(step.x), 0.06, this.worldZ(step.y)));
+    });
+
+    this.pathLine.geometry.dispose();
+    this.pathLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    this.pathLine.visible = true;
   }
 
   applyFoV(game, prisoner, enabled) {

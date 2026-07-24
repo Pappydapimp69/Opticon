@@ -40,7 +40,11 @@ const server = http.createServer((req, res) => {
     return -1;
   });
   const keyByDir = ["KeyW","KeyD","KeyS","KeyA"];
-  if (dir >= 0) { await page.keyboard.press(keyByDir[dir]); }
+  if (dir >= 0) {
+    await page.keyboard.press(keyByDir[dir]); // stage the move (hypothetical, not yet real)
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Space"); // commit — actually steps onto the exit
+  }
   await page.waitForTimeout(1200);
 
   const result = await page.evaluate(() => {
