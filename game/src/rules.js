@@ -36,6 +36,16 @@ export function createGame(map, opts = {}) {
       // "I heard that" feedback (unlike game.noise, the Watcher's shared
       // multi-turn intel). Reset at the start of each of their turns.
       selfNoise: [],
+      // AI-controlled-only bookkeeping to guarantee eventual resolution
+      // (resolves T24: a cautious prisoner AI could stall forever against a
+      // human Watcher, with no round cap to force it). `stalledTurns` counts
+      // turns since the LAST time the prisoner beat its own best-ever
+      // distance to the exit — not just turn-over-turn delta, since a small
+      // oscillation (advance/retreat in a loop) resets a naive consecutive
+      // counter every other turn without ever making real progress.
+      // Unused for a human-controlled prisoner. See prisonerAI.js.
+      stalledTurns: 0,
+      bestDistToExit: Infinity,
     })
   );
 

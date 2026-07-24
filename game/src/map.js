@@ -312,6 +312,11 @@ function passableForConnectivity(tiles, objects, x, y, size) {
   if (t !== TILE.FLOOR) return false;
   const o = objects[y][x];
   if (o === OBJ.LIGHT) return false; // lamp fixture is solid
+  // A switch can never actually be occupied (stepping toward one only
+  // toggles it in place — see rules.js moveActivePrisoner), so it must not
+  // count as a connectivity pass-through either, or the generator could
+  // "guarantee" a route that real movement can never actually complete.
+  if (o === OBJ.SWITCH) return false;
   return true; // doors count as passable (openable)
 }
 

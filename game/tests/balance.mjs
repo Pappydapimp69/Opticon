@@ -76,5 +76,17 @@ if (!(easyEsc >= hardEsc)) {
   console.error(`\n✗ difficulty inverted: easy escape ${(easyEsc*100)|0}% < hard ${(hardEsc*100)|0}%`);
   ok = false;
 }
+// Regression guard: a stalled/oscillating AI (e.g. routing through a tile it
+// can never actually occupy, like a switch) shows up here as a spike in
+// timeouts long before anyone notices in play. 15% is a generous ceiling
+// above the ~0% baseline — catches a real regression, not sim noise.
+const TIMEOUT_CEILING = 0.15;
+for (const r of rows) {
+  const rate = r.timeout / r.n;
+  if (rate > TIMEOUT_CEILING) {
+    console.error(`\n✗ ${r.difficulty}: timeout rate ${(rate*100)|0}% exceeds ${TIMEOUT_CEILING*100}% ceiling — AI may be stalling/oscillating`);
+    ok = false;
+  }
+}
 console.log(ok ? "\n✓ balance sane: both outcomes reachable; difficulty ordered." : "\n✗ balance needs tuning.");
 process.exit(ok ? 0 : 1);

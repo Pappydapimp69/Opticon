@@ -10,6 +10,12 @@ export function prisonerPassable(map, x, y) {
   if (map.tiles[y][x] !== TILE.FLOOR) return false;
   const o = map.objects[y][x];
   if (o === OBJ.LIGHT) return false;
+  // A switch can never actually be occupied — stepping "onto" one just
+  // toggles it and leaves the mover in place (see rules.js moveActivePrisoner).
+  // Treating it as passable here let BFS route a path "through" a tile that
+  // gameplay can never actually cross, which stalled the prisoner AI forever
+  // (every planned step toward it just re-toggled the switch, 0 progress).
+  if (o === OBJ.SWITCH) return false;
   return true;
 }
 

@@ -1,5 +1,5 @@
 // Node test harness for Opticon core logic. Run: node game/tests/logic.test.mjs
-import { generateMap, computeGridSize, classifyRadius, TILE, OBJ } from "../src/map.js";
+import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng } from "../src/map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -13,6 +13,8 @@ import {
   MP_PER_TURN,
 } from "../src/rules.js";
 import { playWatcherTurn } from "../src/watcherAI.js";
+import { prisonerAITurn } from "../src/prisonerAI.js";
+import { prisonerPassable, bfsPath } from "../src/pathfind.js";
 
 let passed = 0;
 let failed = 0;
@@ -324,6 +326,61 @@ section("full random playthrough terminates");
   }
   ok(guard > 0, "game terminated within step budget");
   ok(g.status === "playing" || g.winner, "game reached a terminal or bounded state");
+}
+
+// --- Switch tiles are impassable for pathing (regression) -----------------
+// A switch can never actually be occupied — stepping "toward" one only
+// toggles it and leaves the mover in place (moveActivePrisoner). Treating it
+// as walkable in BFS routed the prisoner AI "through" a tile it could never
+// actually cross, wasting every MP re-toggling the same switch forever.
+section("switch tiles are impassable for pathing (regression)");
+for (let seed = 1; seed <= 25; seed++) {
+  const m = generateMap(seed);
+  for (let y = 0; y < m.size; y++) {
+    for (let x = 0; x < m.size; x++) {
+      if (m.objects[y][x] === OBJ.SWITCH) {
+        ok(!prisonerPassable(m, x, y), `seed ${seed}: switch at (${x},${y}) is not passable for AI pathing`);
+      }
+    }
+  }
+}
+{
+  // A path must never step directly onto a switch tile mid-route.
+  const m = generateMap(4);
+  let sw = null;
+  for (let y = 0; y < m.size && !sw; y++) {
+    for (let x = 0; x < m.size && !sw; x++) {
+      if (m.objects[y][x] === OBJ.SWITCH) sw = { x, y };
+    }
+  }
+  if (sw) {
+    const path = bfsPath(m, m.spawn.x, m.spawn.y, m.exit.x, m.exit.y, null);
+    const touchesSwitch = path && path.some((step) => step.x === sw.x && step.y === sw.y);
+    ok(!touchesSwitch, "spawn->exit path never routes through a switch tile");
+  } else {
+    ok(true, "no switch on this seed's map — skipped");
+  }
+}
+
+// --- Prisoner AI resolves against real oscillation cases (regression) -----
+// These three seeds previously stalled the AI indefinitely (500+ rounds,
+// never terminating) via a slow advance/retreat oscillation that a naive
+// consecutive-turn stall counter never caught (each single turn could look
+// "improved" without ever beating the prisoner's own best-ever distance).
+section("prisoner AI resolves known-oscillation seeds (regression)");
+for (const seed of [3816266512, 2323661502, 3689921436]) {
+  const m = generateMap(seed);
+  const g = createGame(m, { watcherFacing: seed % 4 });
+  const rng = makeRng(seed ^ 0x9e3779b9);
+  let guard = 120;
+  while (g.status === "playing" && guard-- > 0) {
+    prisonerAITurn(g, rng);
+    if (g.status !== "playing") break;
+    endPrisonerTurn(g);
+    if (g.status !== "playing") break;
+    playWatcherTurn(g, "easy", seed);
+  }
+  ok(g.status !== "playing", `seed ${seed}: resolves within 120 rounds (was: never terminated)`);
 }
 
 // --- Summary --------------------------------------------------------------
