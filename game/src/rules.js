@@ -36,6 +36,16 @@ export function createGame(map, opts = {}) {
       // "I heard that" feedback (unlike game.noise, the Watcher's shared
       // multi-turn intel). Reset at the start of each of their turns.
       selfNoise: [],
+      // AI-controlled-only bookkeeping to guarantee eventual resolution
+      // (resolves T24: a cautious prisoner AI could stall forever against a
+      // human Watcher, with no round cap to force it). `stalledTurns` counts
+      // turns since the LAST time the prisoner beat its own best-ever
+      // distance to the exit — not just turn-over-turn delta, since a small
+      // oscillation (advance/retreat in a loop) resets a naive consecutive
+      // counter every other turn without ever making real progress.
+      // Unused for a human-controlled prisoner. See prisonerAI.js.
+      stalledTurns: 0,
+      bestDistToExit: Infinity,
     })
   );
 
@@ -288,7 +298,30 @@ export function setBluff(game, dir) {
 
 // The Watcher commits: scan the true gaze wedge. Any prisoner inside it that is
 // exposed (lit OR on a fresh noise tile) is captured.
-export function watcherScan(game) {
+// Capture exposure widens with difficulty (Brain idea OPT-E1 / resolves
+// tension OPT-1: an AI-vs-AI balance sim can't measure a "harder" Watcher
+// whose only edge is bluff frequency, since the AI has no model of a human
+// reading the tower eye — bluffing is invisible to the sim either way. This
+// makes difficulty a genuine mechanical lever instead: easy forgives noise
+// without light, hard punishes noise near you even unlit).
+//  - easy:   caught only if actually LIT.
+//  - medium: lit OR standing on a fresh noise tile (original rule).
+//  - hard:   lit OR noise on/adjacent (within 1 tile) — sound alone can
+//            doom you if you're careless nearby, not just on the exact tile.
+function isExposed(game, x, y, difficulty) {
+  if (isLit(game, x, y)) return true;
+  if (difficulty === "easy") return false;
+  if (difficulty === "hard") return noiseNear(game, x, y, 1);
+  return noiseAt(game, x, y); // medium (default)
+}
+
+function noiseNear(game, x, y, radius) {
+  return game.noise.some(
+    (n) => Math.max(Math.abs(n.x - x), Math.abs(n.y - y)) <= radius
+  );
+}
+
+export function watcherScan(game, difficulty = "medium") {
   if (game.turn !== "Watcher") return { ok: false };
   // First-round grace: the eye is still "waking up" — no captures on round 1.
   // This gives players a turn to read the board and the visible gaze before risk.
@@ -301,8 +334,7 @@ export function watcherScan(game) {
   for (const p of game.prisoners) {
     if (!p.alive || p.escaped) continue;
     if (!inWatcherGaze(game, dir, p.x, p.y)) continue;
-    const exposed = isLit(game, p.x, p.y) || noiseAt(game, p.x, p.y);
-    if (exposed) {
+    if (isExposed(game, p.x, p.y, difficulty)) {
       p.alive = false;
       caught = p;
       logMsg(game, `Watcher's gaze locks on — Prisoner ${p.id + 1} is caught!`);
