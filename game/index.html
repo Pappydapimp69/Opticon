@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=beta-0.20.0" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.21.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -84,10 +84,13 @@
 
       <details class="how">
         <summary data-row="5" data-col="0" tabindex="0">How to play</summary>
+        <p class="how-goal">Prisoners escape through the gate; the Watcher tries to catch one in its gaze. Play either side, alone or 2-player.</p>
         <ul>
-          <li><b>Prisoner</b> — Move up to 3 tiles/turn (WASD / arrows). A single step is quiet; moving 2+ tiles reveals the tile you started on as <b>noise</b>. Windows can be <b>broken</b> for a loud shortcut or distraction (Shift + direction). Reach the glowing green <b>gate</b> to escape.</li>
-          <li><b>Watcher</b> — You sit in the tower and never see prisoners directly. Rotate your 90° gaze (Q/E), <b>bluff</b> a second direction (1–4) to spread paranoia, then press <b>Space</b> to scan &amp; end your turn. A prisoner caught in your true gaze while <b>lit or making noise</b> is captured.</li>
+          <li><b>Prisoner</b> — Move up to 3 tiles/turn (WASD / arrows). One step is quiet; 2+ tiles in a turn leaves <b>noise</b> behind — a red pulse the Watcher can see. A <b>red screen edge + heartbeat</b> means the Watcher's gaze covers you RIGHT NOW while you're lit or noisy — that's the danger signal, not the text log. Break a window for a loud shortcut or distraction (Shift + direction). You lead a group of 3 — teammates move on their own.</li>
+          <li><b>Watcher</b> — You never see prisoners directly, only noise pings and light. Rotate your 90° gaze (Q/E), <b>bluff</b> a second claimed direction (1–4) to mislead, then <b>Space</b> to scan &amp; end your turn. Anyone caught in your TRUE gaze while lit or noisy is captured.</li>
+          <li><b>Captured vs. escaped</b> — a captured prisoner is out; the Watcher wins once every prisoner is caught or the round limit hits. Any one prisoner reaching the gate is a Prisoner win.</li>
           <li><b>Views</b> — Press <b>V / Tab</b> to cycle Prisoner / Watcher / Overview. Drag to orbit, scroll or pinch to zoom.</li>
+          <li><b>Intro cutscene</b> — a camera flythrough plays at the start of each game; press anything to skip it.</li>
         </ul>
       </details>
 
@@ -146,8 +149,8 @@
       <h2 id="overlayTitle">—</h2>
       <p id="overlayText"></p>
       <div class="overlay-actions">
-        <button id="btnRestart2" class="play-btn" onclick="document.getElementById('btnRestart').click()">Play again</button>
-        <button class="play-btn ghost" onclick="document.getElementById('btnMenu').click()">Main menu</button>
+        <button id="btnRestart2" class="play-btn" data-row="0" data-col="0" onclick="document.getElementById('btnRestart').click()">Play again</button>
+        <button class="play-btn ghost" data-row="0" data-col="1" onclick="document.getElementById('btnMenu').click()">Main menu</button>
       </div>
     </div>
   </div>
@@ -163,6 +166,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js?v=beta-0.20.0"></script>
+  <script type="module" src="src/main.js?v=beta-0.21.0"></script>
 </body>
 </html>

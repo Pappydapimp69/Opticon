@@ -69,7 +69,7 @@ export class Input {
     // goes back a stage. Holding Enter/Space is read directly via isHeld()
     // for the hold-to-start stage, so no dedicated keydown case is needed
     // beyond the normal confirm dispatch below.
-    if (this.mode === "menu" && this.menuHandlers) {
+    if ((this.mode === "menu" || this.mode === "overlay") && this.menuHandlers) {
       const { navX, navY, select, back } = this.menuHandlers;
       const m = {
         ArrowUp: () => navY(-1), KeyW: () => navY(-1),
@@ -180,7 +180,7 @@ export class Input {
       return;
     }
 
-    if (this.mode === "menu" && this.menuHandlers) {
+    if ((this.mode === "menu" || this.mode === "overlay") && this.menuHandlers) {
       // Up/down and left/right are kept on SEPARATE axes end-to-end (this was
       // the root cause of "any button skips to the game": up/down/left/right
       // used to share one flat list, so any direction could wander onto a
