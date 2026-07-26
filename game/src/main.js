@@ -24,7 +24,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.18.0";
+const BUILD = "beta-0.19.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -54,6 +54,7 @@ const app = {
   running: false,
   lastT: 0,
   aiThinking: false,
+  cutsceneActive: false,
 };
 
 // Persisted across sessions: difficulty pick + audio volume. Small and
@@ -483,14 +484,36 @@ function startGame(overrides = {}) {
   app.ui.showHud();
   app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
   app.ui.renderLog(app.game, shouldShowWatcherInfo());
-  app.ui.hint(hintFor());
   updateCommitButton();
+
+  playIntroCutscene();
 
   // If human is Watcher, the AI prisoner acts first each round.
   if (app.config.humanRole === "Watcher" && app.config.mode === "single") {
     // Prisoner AI takes its turn immediately, then it's the human Watcher's turn.
     scheduleAiPrisoner();
   }
+}
+
+// "Lay of the land": a scripted camera flythrough played once per game start
+// (map is procedurally regenerated every game, so the sweep is never stale).
+// Per-prisoner close-ups are shown ONLY when the viewer is legitimately
+// allowed to know spawn locations up front — never a Watcher-role human, and
+// never in hotseat (pass-the-device secrecy predates this feature; a shared
+// physical screen seeing every prisoner's start before the first pass-gate
+// would undercut it). Any intent — move, rotate, restart, anything — skips
+// straight to the real starting gameplay camera; see handleIntent().
+function playIntroCutscene() {
+  app.cutsceneActive = true;
+  const showPrisoners = app.config.mode === "single" && app.config.humanRole === "Prisoner";
+  app.cutsceneShowPrisoners = showPrisoners;
+  app.ui.hint("Press any control to skip");
+  app.renderer
+    .playIntro(app.game, { viewedPrisoner: humanPrisonerIndex(), showPrisoners })
+    .then(() => {
+      app.cutsceneActive = false;
+      app.ui.hint(hintFor());
+    });
 }
 
 function humanLabel() {
@@ -545,6 +568,14 @@ function hintFor() {
 // ---- Intent handling -----------------------------------------------------
 
 function handleIntent(intent, arg) {
+  // Any control skips the cutscene straight to the real starting camera
+  // (same computeCameraTarget the full playback converges on — see
+  // render.js's playIntro/skipIntro) rather than acting on the intent.
+  if (app.cutsceneActive) {
+    app.renderer.skipIntro();
+    if (intent === "restart") startGame(app.config);
+    return;
+  }
   if (intent === "restart") return startGame(app.config);
   if (intent === "cycleView") return cycleView();
   if (!app.running || !app.game || isOver(app.game)) return;
@@ -945,7 +976,7 @@ function updateDangerVignette() {
   const vignette = document.getElementById("dangerVignette");
   if (!vignette) return;
   let danger = false;
-  if (app.running && g && !isOver(g) && shouldShowPrisoner()) {
+  if (app.running && !app.cutsceneActive && g && !isOver(g) && shouldShowPrisoner()) {
     const p = g.prisoners[humanPrisonerIndex()];
     if (p && p.alive && !p.escaped) {
       danger = isExposed(g, p.x, p.y, app.config.difficulty);
@@ -972,8 +1003,15 @@ function loop(t) {
   }
   if (app.renderer && app.game) {
     const viewedPrisoner = app.game.prisoners[humanPrisonerIndex()];
+    // During the cutscene, avatar visibility follows the SAME gate the
+    // close-up waypoints used (never shouldShowPrisoner()'s turn-based
+    // hotseat check, which is true by default at game start) — otherwise a
+    // wide establishing shot could still incidentally reveal a spawned
+    // prisoner to a hotseat viewer who hasn't been gated behind the
+    // pass-device screen yet.
+    const showPrisoner = app.cutsceneActive ? app.cutsceneShowPrisoners : shouldShowPrisoner();
     const result = app.renderer.update(app.game, dt, {
-      showPrisoner: shouldShowPrisoner(),
+      showPrisoner,
       showWatcherInfo: shouldShowWatcherInfo(),
       stagedPath: app.stagedPath,
       viewedPrisoner: humanPrisonerIndex(),

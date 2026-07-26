@@ -80,6 +80,7 @@ const scenario = process.argv[2] || "prisoner";
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(400);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   // Capture an early gameplay screenshot (before heavy play) for visual review.
   const shotPlay = path.join(ROOT, "tests", `play-${scenario}.png`);

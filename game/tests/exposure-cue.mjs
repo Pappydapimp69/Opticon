@@ -60,6 +60,7 @@ function check(cond, label) {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(300);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   // Force the prisoner onto a lit tile (deterministic exposure) and let a
   // frame tick so updateDangerVignette() picks it up.

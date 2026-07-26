@@ -73,6 +73,7 @@ function check(cond, label) {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(300);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
   await page.click("#btnSound");
   await page.waitForTimeout(100);
   vol = await page.evaluate(() => window.__opticon.audio.volume);

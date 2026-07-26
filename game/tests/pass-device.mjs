@@ -63,6 +63,7 @@ function check(cond, label) {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(300);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   const isHidden = async (id) => page.$eval(`#${id}`, (el) => el.classList.contains("hidden"));
 
