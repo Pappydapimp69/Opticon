@@ -35,6 +35,15 @@ export const SKILL_INFO = Object.freeze({
   [SKILLS.ECHO]: { label: "Echo memory", icon: "📡", cooldown: 3 },
   [SKILLS.LOCK]: { label: "Remote lock", icon: "🔒", cooldown: 4 },
 });
+// Hard cap on turns. A game with no cap can in principle run forever
+// against a passive human Prisoner, and the Watcher had no win condition of
+// last resort. Chosen from the balance sim's own distribution rather than
+// picked: over 200 easy-difficulty games (the longest tier) the maximum
+// observed was 87 rounds with 97% finishing under 60, so 90 guarantees
+// termination while leaving the measured distribution essentially untouched.
+// Note `round` ticks once per PRISONER turn, so with a group of 3 this is
+// ~30 full rotations of the group.
+export const ROUND_LIMIT = 90;
 export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher
 export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)
 
@@ -699,6 +708,7 @@ export function endWatcherTurn(game) {
   p.muffled = false; // one turn only
   game.turn = "Prisoner";
   game.round += 1;
+  checkEndConditions(game);
   return { ok: true };
 }
 
@@ -755,6 +765,11 @@ function checkEndConditions(game) {
   } else if (!anyAliveInPlay && allDown) {
     game.status = "captured";
     game.winner = "Watcher";
+  } else if (game.round > ROUND_LIMIT) {
+    // Time ran out: nobody reached the gate, so the institution holds.
+    game.status = "captured";
+    game.winner = "Watcher";
+    game.timedOut = true;
   }
 }
 

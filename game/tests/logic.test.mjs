@@ -28,6 +28,7 @@ import {
   SKILL_INFO,
   NOISE_TTL,
   isOver,
+  ROUND_LIMIT,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
@@ -882,6 +883,34 @@ for (let seed = 1; seed <= 12; seed++) {
     playWatcherTurn(g, "medium", seed);
   }
   ok(isOver(g), `seed ${seed}: game still terminates with item detours enabled`);
+}
+
+
+// --- Round limit ----------------------------------------------------------
+
+section("the round limit ends the game as a Watcher win");
+{
+  const g = createGame(generateMap(21));
+  g.round = ROUND_LIMIT;
+  g.turn = "Watcher";
+  ok(!isOver(g), "still playing at exactly the limit");
+  endWatcherTurn(g); // ticks round past the cap
+  ok(isOver(g), "game ends once the round passes the limit");
+  ok(g.winner === "Watcher", "the Watcher wins on time");
+  ok(g.timedOut === true, "the timeout is flagged so the UI can say WHY");
+  ok(g.status === "captured", "status reflects a Watcher victory");
+}
+
+section("an escape still beats the clock");
+{
+  const g = createGame(generateMap(22));
+  const p = g.prisoners[0];
+  g.round = ROUND_LIMIT;
+  p.escaped = true;
+  g.turn = "Watcher";
+  endWatcherTurn(g);
+  ok(g.winner === "Prisoner", "a prisoner already out wins even at the cap");
+  ok(!g.timedOut, "and it is not recorded as a timeout");
 }
 
 
