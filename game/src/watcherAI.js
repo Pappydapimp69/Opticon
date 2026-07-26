@@ -81,7 +81,11 @@ function dominantDir(dx, dy) {
 }
 
 // Decide + apply a full Watcher turn. Returns a list of actions taken (for UI).
-export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
+// `exposureTier` lets a caller drive the CAPTURE RULE independently of the
+// AI's decision quality. They're the same thing in the shipped game, but
+// they are two different levers, and keeping them separable is what makes
+// the difficulty question measurable at all (see sandbox/t25-*).
+export function playWatcherTurn(game, difficulty = "medium", seed = 1, exposureTier = null) {
   const tuning = DIFFICULTY[difficulty] || DIFFICULTY.medium;
   const rng = makeRng((seed ^ (game.round * 2654435761)) >>> 0);
   const actions = [];
@@ -148,7 +152,7 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
   }
 
   // Commit the scan (captures an exposed prisoner in the true wedge).
-  const scan = watcherScan(game, difficulty);
+  const scan = watcherScan(game, exposureTier || difficulty);
   actions.push({ type: "scan", caught: scan.caught ? scan.caught.id : null });
 
   // End the turn (ages noise, hands back to prisoner).

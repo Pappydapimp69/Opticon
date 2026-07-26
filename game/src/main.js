@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.29.0";
+const BUILD = "beta-0.30.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -1077,7 +1077,7 @@ function handleWatcherIntent(intent, arg) {
     doUseSkill(arg);
   } else if (intent === "endTurn") {
     // Scan (commit), then end turn.
-    const scan = watcherScan(g, app.config.difficulty);
+    const scan = watcherScan(g, exposureTier());
     app.audio.play("scan");
     if (scan.caught) {
       app.audio.play("caught");
@@ -1111,7 +1111,7 @@ function scheduleAiWatcher() {
   setTimeout(() => {
     const g = app.game;
     if (!g || isOver(g)) { app.aiThinking = false; return; }
-    const actions = playWatcherTurn(g, app.config.difficulty, app.config.seed);
+    const actions = playWatcherTurn(g, app.config.difficulty, app.config.seed, exposureTier());
     for (const a of actions) {
       if (a.type === "rotate") app.audio.play("rotate");
       if (a.type === "bluff") app.audio.play("bluff");
@@ -1202,10 +1202,25 @@ function waitForWalk(prisonerIndex, done) {
   requestAnimationFrame(tick);
 }
 
+// Difficulty must always describe the HUMAN'S OPPOSITION. When the human
+// plays Watcher, their opposition is the prisoners, so the tier drives
+// prisoner-AI competence; the shared capture rule is held at a neutral
+// baseline (see exposureTier below), because raising it would hand the
+// human Watcher an easier job while calling it "hard".
+function prisonerSkillTier() {
+  return app.config.humanRole === "Watcher" ? app.config.difficulty : "medium";
+}
+
+// The capture rule is symmetric — it governs the tower, whoever holds it.
+// Tier it by difficulty only when the human is the one being hunted.
+function exposureTier() {
+  return app.config.humanRole === "Watcher" ? "medium" : app.config.difficulty;
+}
+
 // The in-game AI prisoner uses the shared BFS pathing policy. After it acts we
 // surface any noise it created as pings so the human Watcher gets feedback.
 function aiPrisonerTurn(g) {
-  const result = prisonerAITurn(g);
+  const result = prisonerAITurn(g, Math.random, prisonerSkillTier());
   for (const n of g.noise) app.renderer.triggerPing(n.x, n.y);
   return result;
 }
@@ -1291,7 +1306,7 @@ function updateDangerVignette() {
   if (app.running && !app.cutsceneActive && g && !isOver(g) && shouldShowPrisoner()) {
     const p = g.prisoners[humanPrisonerIndex()];
     if (p && p.alive && !p.escaped) {
-      danger = isExposed(g, p.x, p.y, app.config.difficulty);
+      danger = isExposed(g, p.x, p.y, exposureTier());
     }
   }
   vignette.classList.toggle("danger", danger);
