@@ -3,14 +3,29 @@ name: Deploy Opticon 3D to GitHub Pages
 # Publishes the game/ directory as the site root, so the game is playable at
 # https://<owner>.github.io/Opticon/ . configure-pages(enablement:true) turns
 # Pages on the first time this runs, so no manual settings change is needed.
+#
+# MANUAL RE-DISPATCH — READ BEFORE RETRYING.
+# A 404 immediately after a successful deploy is usually CDN propagation and
+# clears on its own or after ONE re-dispatch. That remedy has a ceiling.
+# On 2026-07-26 an unbounded retry habit produced 30 runs in a day (18 of
+# them manual) and ended with the whole site serving origin 404s while every
+# run still reported success.
+# Before re-dispatching, DISTINGUISH the two failures:
+#   * propagation — some edge nodes 404 while others serve; `age:` varies; a
+#                   known asset may still load. One retry is reasonable.
+#   * origin down — root AND a known static asset (e.g. css/style.css) both
+#                   404 with `age: 0` from several different x-served-by
+#                   nodes. MORE DEPLOYS CANNOT FIX THIS. Stop, observe at low
+#                   frequency, and check the repo's Pages settings.
+# Rule: at most ONE manual re-dispatch per shipped build. Never loop.
 
+# Deploy is workflow_dispatch ONLY, from the default branch.
+# There used to be a push trigger on the feature branch, which was pure
+# waste: the github-pages environment refuses to deploy from a non-default
+# branch (see memory E3), so every one of those runs failed by construction
+# — 12 of 30 runs on 2026-07-26 were guaranteed-fail branch pushes. They
+# cost deploy quota, buried real failures in noise, and taught nothing.
 on:
-  push:
-    branches:
-      - claude/opticon-3d-browser-game-3lxa2y
-    paths:
-      - "game/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
