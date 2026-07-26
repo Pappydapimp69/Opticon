@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.27.0";
+const BUILD = "beta-0.28.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -39,6 +39,15 @@ const BUILD = "beta-0.27.0";
 // device secrecy for a whole GROUP of human-controlled prisoners is a much
 // bigger UX problem than this pass takes on.
 const PRISONER_COUNT = 3;
+
+// AI pacing. The old values (650ms think, no wait for the walk animation)
+// made companion turns flash past before you could read them. These give
+// each AI turn a beat to register, and the turn only advances once the
+// avatar has actually finished walking its route.
+const AI_THINK_MS = 900;   // pause before an AI prisoner commits its move
+const AI_SETTLE_MS = 450;  // beat after the walk lands, before the handoff
+const AI_STEP_DUR = 0.34;  // seconds per tile for an AI walk (human: 0.22)
+const AI_WATCHER_MS = 1200; // the Watcher's deliberation before it scans
 
 const app = {
   renderer: null,
@@ -1130,42 +1139,73 @@ function scheduleAiWatcher() {
     }
     app.ui.hint(hintFor());
   updateCommitButton();
-  }, 750);
+  }, AI_WATCHER_MS);
 }
 
 function scheduleAiPrisoner() {
   if (app.aiThinking) return;
   app.aiThinking = true;
-  app.ui.banner("Prisoner is moving...", "prisoner");
+  const idx = app.game ? app.game.activePrisoner : 0;
+  app.ui.banner(`Prisoner ${idx + 1} is moving...`, "prisoner");
   setTimeout(() => {
     const g = app.game;
     if (!g || isOver(g)) { app.aiThinking = false; return; }
-    aiPrisonerTurn(g);
-    endPrisonerTurn(g);
-    app.aiThinking = false;
-    checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-    app.ui.renderLog(g, shouldShowWatcherInfo());
-    // endPrisonerTurn always hands off to the Watcher — but with AI
-    // companions, this can fire in single-player Prisoner mode too, where
-    // the Watcher is ALSO AI, not the human waiting on this banner.
-    if (!isOver(g)) {
-      if (humanControlsWatcher()) {
-        app.ui.banner("Watcher's turn — your move", "watcher");
-      } else {
-        scheduleAiWatcher();
-      }
+    const acting = g.activePrisoner;
+    // Resolve the AI's whole turn in the sim, then hand the tile sequence to
+    // the renderer so the avatar visibly WALKS it. Previously the sim jumped
+    // the prisoner to its end tile and the avatar just slid there, which read
+    // as teleporting; now a companion's move is legible as a route.
+    const result = aiPrisonerTurn(g);
+    if (result && result.path && result.path.length) {
+      app.renderer.walkTo(acting, result.from, result.path, AI_STEP_DUR);
     }
-    app.ui.hint(hintFor());
-  updateCommitButton();
-  }, 650);
+    // Wait for the walk to finish before ending the turn, so the handoff
+    // never races ahead of what the player can actually see happening.
+    waitForWalk(acting, () => {
+      if (!app.game || app.game !== g) { app.aiThinking = false; return; }
+      endPrisonerTurn(g);
+      app.aiThinking = false;
+      checkOver();
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+      // endPrisonerTurn always hands off to the Watcher — but with AI
+      // companions, this can fire in single-player Prisoner mode too, where
+      // the Watcher is ALSO AI, not the human waiting on this banner.
+      if (!isOver(g)) {
+        if (humanControlsWatcher()) {
+          app.ui.banner("Watcher's turn — your move", "watcher");
+        } else {
+          scheduleAiWatcher();
+        }
+      }
+      app.ui.hint(hintFor());
+      updateCommitButton();
+    });
+  }, AI_THINK_MS);
+}
+
+// Poll until a given avatar's walk queue drains, then run `done`. Falls back
+// to a hard timeout so a dropped frame or a zero-length walk can never wedge
+// the turn chain waiting on an animation that will never complete.
+function waitForWalk(prisonerIndex, done) {
+  const started = performance.now();
+  const tick = () => {
+    const av = app.renderer && app.renderer.avatars[prisonerIndex];
+    const idle = !av || av.walk.queue.length === 0;
+    if (idle || performance.now() - started > 6000) {
+      setTimeout(done, AI_SETTLE_MS);
+      return;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 // The in-game AI prisoner uses the shared BFS pathing policy. After it acts we
 // surface any noise it created as pings so the human Watcher gets feedback.
 function aiPrisonerTurn(g) {
-  prisonerAITurn(g);
+  const result = prisonerAITurn(g);
   for (const n of g.noise) app.renderer.triggerPing(n.x, n.y);
+  return result;
 }
 
 // ---- Views ---------------------------------------------------------------

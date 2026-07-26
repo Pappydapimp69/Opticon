@@ -32,6 +32,16 @@ const COLORS = {
 };
 
 // World scale: one grid tile == TILE_W world units.
+// Per-kind item silhouettes. Shape carries the meaning at distance where
+// colour alone washes out, and colour separates them up close.
+const ITEM_LOOK = {
+  distract: { color: 0xffd166, geo: () => new THREE.SphereGeometry(0.2, 12, 10) },      // bell
+  muffle:   { color: 0xc792ea, geo: () => new THREE.TorusGeometry(0.17, 0.07, 8, 16) }, // cloth loop
+  lockpick: { color: 0x7fd1ff, geo: () => new THREE.ConeGeometry(0.16, 0.42, 4) },      // key spike
+  cutters:  { color: 0xff8b6b, geo: () => new THREE.OctahedronGeometry(0.22) },         // blades
+  _default: { color: 0xffc75a, geo: () => new THREE.OctahedronGeometry(0.22) },
+};
+
 const TILE_W = 1;
 const WALL_H = 1.1;
 const FLOOR_H = 0.12;
@@ -256,18 +266,35 @@ export class Renderer {
           propGroup.add(wmesh);
           this.props.windows.set(`${x},${y}`, wmesh);
         } else if (o === OBJ.ITEM) {
-          // A small floating, spinning cache — reads as "grab this" at a
-          // glance without needing a label at ground level.
+          // Every item kind gets its OWN silhouette and colour. A single
+          // shared token told you "something is here" but not WHAT, so you
+          // couldn't decide whether a detour was worth the noise until you
+          // were standing on it — which is the whole decision the item
+          // system is supposed to offer.
+          const entry = (map.items || []).find((i) => i.x === x && i.y === y);
+          const look = ITEM_LOOK[entry && entry.kind] || ITEM_LOOK._default;
           const it = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.22),
-            new THREE.MeshBasicMaterial({ color: COLORS.item })
+            look.geo(),
+            new THREE.MeshBasicMaterial({ color: look.color })
           );
           it.position.set(wx, 0.45, wz);
           propGroup.add(it);
-          const glow = new THREE.PointLight(COLORS.item, 0.5, 3.2, 2);
+          const glow = new THREE.PointLight(look.color, 0.6, 3.4, 2);
           glow.position.set(wx, 0.5, wz);
           propGroup.add(glow);
-          this.props.items.set(`${x},${y}`, { mesh: it, light: glow });
+          // A matching ground ring, readable from the high/overview cameras
+          // where a small floating token is easy to miss entirely.
+          const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.3, 0.42, 20),
+            new THREE.MeshBasicMaterial({
+              color: look.color, transparent: true, opacity: 0.45,
+              side: THREE.DoubleSide,
+            })
+          );
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.set(wx, 0.03, wz);
+          propGroup.add(ring);
+          this.props.items.set(`${x},${y}`, { mesh: it, light: glow, ring });
         } else if (o === OBJ.SWITCH) {
           const s = new THREE.Mesh(
             new THREE.BoxGeometry(0.22, 0.5, 0.22),
@@ -497,12 +524,16 @@ export class Renderer {
   // Enqueue a sequence of grid tiles {x,y,event} for prisoner `prisonerIndex`'s
   // avatar to visibly walk through in order, starting from `from`. Replaces
   // any prior queue for that specific prisoner only.
-  walkTo(prisonerIndex, from, steps) {
+  // `stepDur` overrides the per-tile pace. AI companions walk a touch slower
+  // than the human's own committed move so their routes are actually
+  // readable as movement rather than a blur.
+  walkTo(prisonerIndex, from, steps, stepDur) {
     const a = this.avatars[prisonerIndex];
     if (!a) return;
     a.walk.queue = steps.slice();
     a.walk.from = { x: from.x, y: from.y };
     a.walk.t = 0;
+    a.walk.stepDur = stepDur || 0.22;
   }
 
   // `color` defaults to the noise-ping red; pass COLORS.captureFlash for a
@@ -623,6 +654,7 @@ export class Renderer {
       const gone = game.takenItems && game.takenItems.has(iy * map.size + ix);
       it.mesh.visible = !gone;
       it.light.visible = !gone;
+      if (it.ring) it.ring.visible = !gone;
       if (!gone) {
         it.mesh.rotation.y = this.time * 1.6;
         it.mesh.position.y = 0.45 + Math.sin(this.time * 2.4 + ix) * 0.07;
@@ -867,12 +899,12 @@ export class Renderer {
     waypoints.push({
       pos: new THREE.Vector3(towerX + r * 1.6, r * 1.6 + 4, towerZ + r * 1.8),
       target: new THREE.Vector3(towerX, 0, towerZ),
-      dur: 1.7,
+      dur: 3.0,
     });
     waypoints.push({
       pos: new THREE.Vector3(towerX - r * 1.2, r * 1.0 + 3, towerZ + r * 0.35),
       target: new THREE.Vector3(towerX, 0, towerZ),
-      dur: 1.5,
+      dur: 2.6,
     });
     const exitProp = this.props && this.props.exit;
     if (exitProp) {
@@ -880,7 +912,7 @@ export class Renderer {
       waypoints.push({
         pos: new THREE.Vector3(ep.x + 3, 3, ep.z + 3),
         target: new THREE.Vector3(ep.x, 0.6, ep.z),
-        dur: 1.2,
+        dur: 2.2,
       });
     }
     // Per-prisoner close-ups — ONLY when the viewer is legitimately allowed
@@ -895,13 +927,13 @@ export class Renderer {
         waypoints.push({
           pos: new THREE.Vector3(wx + 1.6, 1.4, wz + 1.7),
           target: new THREE.Vector3(wx, 0.6, wz),
-          dur: 1.1,
+          dur: 2.0,
         });
       }
     }
     // Settle into the REAL starting gameplay camera — identical formula the
     // skip path snaps to directly.
-    waypoints.push({ pos: endCam.pos.clone(), target: endCam.target.clone(), dur: 1.0 });
+    waypoints.push({ pos: endCam.pos.clone(), target: endCam.target.clone(), dur: 1.8 });
     return waypoints;
   }
 
@@ -954,7 +986,7 @@ export class Renderer {
     // every waypoint above is already derived from real map/spawn/gate
     // positions, so this only ever needs to catch a camera dipping below
     // the floor plane, not steer around scripted geometry).
-    const k = smoothing(dt, 0.3);
+    const k = smoothing(dt, 0.55);
     this.camPos.lerp(seg.pos, k);
     this.camPos.y = Math.max(this.camPos.y, 1.2);
     this.camTarget.lerp(seg.target, k);

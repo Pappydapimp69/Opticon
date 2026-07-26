@@ -146,8 +146,38 @@ async function startGame(page, playBtn) {
     const count = await page.evaluate(() => window.__opticon.game.prisoners.length);
     check(count === 1, `hotseat: still exactly 1 prisoner (got ${count})`);
 
-    check(errors.length === 0, `scenario 3: no console errors (${errors.length} found)`);
+  check(errors.length === 0, `scenario 3: no console errors (${errors.length} found)`);
     errors.slice(0, 5).forEach((e) => console.log("    •", e));
+    await page.close();
+  }
+
+
+  // --- Scenario 4: AI movement must be ANIMATED, not teleported. Previously
+  // the sim resolved a companion's whole turn instantly and the avatar merely
+  // slid to the end tile, so a move read as a jump. Catching a non-empty walk
+  // queue mid-turn proves the AI's route was handed to the renderer.
+  {
+    const errors = [];
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    page.on("pageerror", (e) => errors.push("PAGEERROR: " + e.message));
+    await startGame(page, "#playWatcher"); // every prisoner is AI in this mode
+    let sawQueue = false;
+    let sawPace = false;
+    for (let i = 0; i < 150 && !sawQueue; i++) {
+      const s = await page.evaluate(() => {
+        const r = window.__opticon.renderer;
+        const a = r.avatars.find((av) => av.walk.queue.length > 0);
+        return a ? { len: a.walk.queue.length, dur: a.walk.stepDur } : null;
+      });
+      if (s) {
+        sawQueue = true;
+        sawPace = s.dur > 0.22; // AI walks slower than a human commit
+      }
+      await page.waitForTimeout(50);
+    }
+    check(sawQueue, "an AI prisoner's move is queued as a walk (animated, not teleported)");
+    check(sawPace, "AI walks use the slower, readable per-tile pace");
+    check(errors.length === 0, `scenario 4: no page errors (${errors.length} found)`);
     await page.close();
   }
 
