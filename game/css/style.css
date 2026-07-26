@@ -299,3 +299,4 @@ html, body {
 .skill-chip:not(.cooling):not(.unusable) { border-color: #4a6f9f; }
 @media (max-width: 720px) { .skill-bar { bottom: 210px; } }
 .item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }
+.stat .val.urgent { color: #ff6b6b; animation: dangerPulse 1s ease-in-out infinite; }

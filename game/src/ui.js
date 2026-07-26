@@ -1,6 +1,7 @@
 // ui.js — DOM HUD, menu, overlays, log. Presentation only; main.js drives it.
 
 import { DIRS } from "./map.js";
+import { ROUND_LIMIT } from "./rules.js";
 
 export class UI {
   constructor(root) {
@@ -54,7 +55,11 @@ export class UI {
       ? DIRS[game.watcher.facing] + (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")
       : "?";
     this.el.mp.textContent = "●".repeat(Math.max(0, p.mp)) + "○".repeat(Math.max(0, p.mpMax ? p.mpMax - p.mp : 3 - p.mp));
-    this.el.round.textContent = game.round;
+    // Show the cap, and warn once it's genuinely close — a limit nobody can
+    // see isn't pressure, it's an ambush.
+    this.el.round.textContent = `${game.round}/${ROUND_LIMIT}`;
+    const left = ROUND_LIMIT - game.round;
+    this.el.round.classList.toggle("urgent", left <= 10);
     this.el.view.textContent = viewMode;
     this.el.role.textContent = humanRole;
 
@@ -92,11 +97,13 @@ export class UI {
   gameOver(game, meta = {}) {
     const won = game.winner === "Prisoner";
     this.el.overlay.classList.remove("hidden");
-    this.el.overlayTitle.textContent = won ? "ESCAPED" : "CAPTURED";
+    this.el.overlayTitle.textContent = won ? "ESCAPED" : game.timedOut ? "TIME UP" : "CAPTURED";
     this.el.overlayTitle.className = won ? "escaped" : "captured";
     const flavor = won
       ? "You slipped past the eye and reached the gate. Freedom."
-      : "The Watcher's gaze found you. The panopticon holds.";
+      : game.timedOut
+        ? "Time ran out. Nobody reached the gate — the panopticon holds."
+        : "The Watcher's gaze found you. The panopticon holds.";
     const roundWord = game.round === 1 ? "round" : "rounds";
     const stats = `${flavor} (${game.round} ${roundWord}${meta.difficulty ? `, ${meta.difficulty}` : ""})`;
     this.el.overlayText.textContent = stats;
