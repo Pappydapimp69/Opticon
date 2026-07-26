@@ -532,6 +532,16 @@ export class Renderer {
     if (!a) return;
     a.walk.queue = steps.slice();
     a.walk.from = { x: from.x, y: from.y };
+    // Start the tween from where the avatar ACTUALLY is, not from where the
+    // grid says it should be. The idle path uses exponential smoothing, which
+    // is asymptotic and never exactly arrives — so if any frame renders
+    // between a sim move and this call, `from` and the rendered position
+    // disagree and the tween opens with a jump. Measured in
+    // sandbox/smoothing-to-tween-handoff.mjs: up to ~0.85 tiles after a
+    // 0.02s idle. Both current callers happen to invoke walkTo in the same
+    // tick as the move, so the residual is ~0 today and this changes nothing
+    // — it exists so that stops being load-bearing.
+    a.walk.fromWorld = { x: a.group.position.x, z: a.group.position.z };
     a.walk.t = 0;
     a.walk.stepDur = stepDur || 0.22;
   }
@@ -599,12 +609,15 @@ export class Renderer {
         const target = av.walk.queue[0];
         av.walk.t = Math.min(1, av.walk.t + dt / av.walk.stepDur);
         const te = easeInOutQuad(av.walk.t);
-        av.group.position.x =
-          this.worldX(av.walk.from.x) + (this.worldX(target.x) - this.worldX(av.walk.from.x)) * te;
-        av.group.position.z =
-          this.worldZ(av.walk.from.y) + (this.worldZ(target.y) - this.worldZ(av.walk.from.y)) * te;
+        // First leg interpolates from the avatar's real position (see
+        // walkTo); every later leg starts exactly on a tile by construction.
+        const fx = av.walk.fromWorld ? av.walk.fromWorld.x : this.worldX(av.walk.from.x);
+        const fz = av.walk.fromWorld ? av.walk.fromWorld.z : this.worldZ(av.walk.from.y);
+        av.group.position.x = fx + (this.worldX(target.x) - fx) * te;
+        av.group.position.z = fz + (this.worldZ(target.y) - fz) * te;
         if (av.walk.t >= 1) {
           av.walk.from = { x: target.x, y: target.y };
+          av.walk.fromWorld = { x: this.worldX(target.x), z: this.worldZ(target.y) };
           av.walk.queue.shift();
           av.walk.t = 0;
           arrived.push(target);
