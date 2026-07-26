@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.11.0";
+const BUILD = "beta-0.12.0";
 
 const app = {
   renderer: null,
@@ -78,6 +78,7 @@ function boot() {
   app.ui = new UI(document.body);
   app.input = new Input(handleIntent, { onScheme: onSchemeChange });
   app.input.setIntroHandler(dismissIntro);
+  app.input.setPassHandler(dismissPassDevice);
   app.input.setMenuHandlers(menuNavX, menuNavY, menuSelect, menuBack);
 
   const saved = loadSettings();
@@ -88,6 +89,8 @@ function boot() {
 
   const introEl = document.getElementById("intro");
   if (introEl) introEl.addEventListener("pointerdown", dismissIntro);
+  const passEl = document.getElementById("passDevice");
+  if (passEl) passEl.addEventListener("pointerdown", dismissPassDevice);
 
   // Touch buttons + canvas orbit.
   const touchRoot = document.getElementById("touchControls");
@@ -144,6 +147,48 @@ function dismissIntro() {
     setTimeout(() => intro.classList.add("hidden"), 520);
   }
   openMenu();
+}
+
+// Hotseat pass-the-device gate: a turn switch happens instantly in game
+// state, but the physical device handoff does not — without this, the
+// OUTGOING player's screen would show the incoming player's privileged view
+// (e.g. the Watcher's true gaze) for a moment before they hand the device
+// over. Blocks input/rendering-relevant state (app.running, input.mode)
+// until the incoming player confirms; only then does the camera/HUD switch.
+function showPassDevice() {
+  const g = app.game;
+  if (!g) return;
+  const el = document.getElementById("passDevice");
+  const title = document.getElementById("passDeviceTitle");
+  if (title) {
+    title.textContent = `Pass to the ${g.turn}`;
+    title.className = g.turn === "Watcher" ? "watcher" : "prisoner";
+  }
+  if (el) el.classList.remove("hidden");
+  app.running = false;
+  app.input.mode = "pass";
+}
+
+function dismissPassDevice() {
+  const el = document.getElementById("passDevice");
+  if (el) el.classList.add("hidden");
+  const g = app.game;
+  if (!g) return;
+  app.audio.resume();
+  app.audio.play("ui");
+  if (g.turn === "Watcher") {
+    setView("watcher");
+    app.ui.banner("Watcher's turn", "watcher");
+  } else {
+    setView("prisoner");
+    app.ui.banner("Prisoner's turn", "prisoner");
+  }
+  app.running = true;
+  app.input.mode = "game";
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.renderLog(g);
+  app.ui.hint(hintFor());
+  updateCommitButton();
 }
 
 function openMenu() {
@@ -509,12 +554,12 @@ function doEndPrisonerTurn() {
   }
   app.audio.play("turn");
   // Now the Watcher acts.
-  if (app.config.mode === "hotseat" || app.config.humanRole === "Watcher") {
-    // Human watcher plays; switch view for hotseat.
-    if (app.config.mode === "hotseat") setView("watcher");
+  if (app.config.mode === "hotseat") {
+    showPassDevice(); // block the view until the Watcher's player confirms
+  } else if (app.config.humanRole === "Watcher") {
     app.ui.banner("Watcher's turn", "watcher");
     app.ui.hint(hintFor());
-  updateCommitButton();
+    updateCommitButton();
   } else {
     // AI watcher.
     scheduleAiWatcher();
@@ -542,14 +587,15 @@ function handleWatcherIntent(intent, arg) {
     endWatcherTurn(g);
     app.audio.play("turn");
     if (app.config.mode === "hotseat") {
-      setView("prisoner");
-      app.ui.banner("Prisoner's turn", "prisoner");
-    } else if (app.config.humanRole === "Watcher") {
-      // AI prisoner takes its turn now.
-      scheduleAiPrisoner();
+      showPassDevice(); // block the view until the Prisoner's player confirms
+    } else {
+      if (app.config.humanRole === "Watcher") {
+        // AI prisoner takes its turn now.
+        scheduleAiPrisoner();
+      }
+      app.ui.hint(hintFor());
+      updateCommitButton();
     }
-    app.ui.hint(hintFor());
-  updateCommitButton();
   }
 }
 
