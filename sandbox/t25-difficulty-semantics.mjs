@@ -23,12 +23,30 @@ const TIERS = ["easy", "medium", "hard"];
 // `exposureTier` drives the capture rule (isExposed) inside watcherScan.
 // Separating them is the whole point: the shipped game ties them together,
 // so we have to pull them apart to see which one the label is really moving.
+// Deterministic but NON-CONSTANT randomness. An earlier version of this
+// sandbox pinned rng to a constant 0.5, which silently collapsed every
+// probability-threshold parameter to always-true or always-false — two
+// tiers differing only in a probability became the SAME agent, and the
+// grid below reported them as indistinguishable for that reason rather
+// than for any real one. A seeded PRNG keeps runs reproducible without
+// disabling the very knobs under test.
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function run(seed, behaviourTier, exposureTier) {
+  const rng = seeded(seed ^ 0x9e3779b9);
   const map = generateMap(seed, { ...MAP_DEFAULTS, prisonerCount: 3 });
   const g = createGame(map, { watcherFacing: seed % 4, prisoners: map.spawns });
   let guard = 200;
   while (!isOver(g) && guard-- > 0) {
-    prisonerAITurn(g, () => 0.5); // fixed tie-break: no RNG in the sandbox
+    prisonerAITurn(g, rng, behaviourTier === null ? "medium" : "medium");
     if (isOver(g)) break;
     endPrisonerTurn(g);
     if (isOver(g)) break;

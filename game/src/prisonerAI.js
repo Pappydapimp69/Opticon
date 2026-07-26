@@ -45,30 +45,44 @@ function dirBetween(ax, ay, bx, by) {
 // cautious AI could in principle stall a human Watcher's game forever).
 const STALL_LIMIT = 3;
 
-// Prisoner-AI competence tiers. These exist so difficulty can describe the
-// HUMAN'S OPPOSITION in Watcher mode, instead of leaning on the capture
-// rule — which is symmetric and therefore gifts whoever holds the tower
-// (measured in sandbox/t25-difficulty-semantics.mjs: the exposure rule
-// swings capture ~13pts easy->hard while Watcher behaviour swings ~3, so a
-// human Watcher on "hard" was being handed an EASIER job).
-//   caution  — chance of refusing to end a turn on a catchable tile
-//   dawdle   — chance of halting at 2 tiles instead of pressing on
-//   useItems — whether it bothers spending pickups at all
+// Prisoner-AI behaviour tiers.
 //
-// NOTE the direction of `dawdle`: a FIRST pass at these tiers gave the
-// "hard" prisoner MORE stopping discipline, on the theory that moving less
-// means being heard less. The sandbox refuted it — capture went UP with
-// difficulty (61/62/64%), the wrong way round. Halting costs tempo, and
-// tempo is the scarce resource here (same finding as the item-detour
-// measurement): every extra round spent creeping is another Watcher scan.
-// So the competent prisoner PUSHES and spends a muffle to cover the noise;
-// the careless one dawdles in the open.
+// MEASURED, and the honest summary is a NEGATIVE result. These were added to
+// give the difficulty setting something to mean when the human plays
+// Watcher, because the capture-exposure rule it used to drive is symmetric
+// and was handing a human Watcher an EASIER job on "hard" (see Tension T25
+// and sandbox/t25-difficulty-semantics.mjs). Pinning exposure to the neutral
+// baseline in Watcher mode fixed that inversion — that part works.
+//
+// What did NOT work is these tiers as a replacement lever. Four distinct
+// designs were measured against 240 fixed-seed games per tier with a seeded
+// PRNG, and every one came out within ~3 points:
+//   1. more stopping-discipline on hard      -> 61/62/64% (backwards)
+//   2. less stopping-discipline on hard      -> 65/67/65% (flat)
+//   3. hard also avoids the gaze quadrant    -> 65/67/70% (backwards; routing
+//                                               around it costs more tempo
+//                                               than the risk it dodges)
+//   4. tempo held constant, caution+items    -> 61/61/62% (flat)
+// The pattern across all four: caution costs turns, turns are the scarce
+// resource, and the saving never pays for the tempo. A prisoner's fate here
+// is dominated by the map and the rules, not by its own decision quality.
+//
+// So these tiers are kept for FLAVOUR — an "easy" prisoner is visibly more
+// careless — and are deliberately NOT relied on as a difficulty lever. A
+// lever with real authority has to be a rules lever (prisoner count, MP, or
+// item density), which is a design call left open in T25 rather than made
+// unattended.
+//   caution   — chance of refusing to end a turn on a catchable tile
+//   dawdle    — chance of halting at 2 tiles instead of pressing on
+//   useItems  — whether it bothers spending pickups at all
+//   avoidGaze — route around the whole watched quadrant (measured harmful;
+//               retained as a named, off-by-default knob so the refutation
+//               is reproducible rather than lost)
 export const PRISONER_SKILL = Object.freeze({
-  easy:   { caution: 0.0, dawdle: 0.8,  useItems: false }, // reckless AND slow
-  medium: { caution: 1.0, dawdle: 0.4,  useItems: true },  // the original behaviour
-  hard:   { caution: 1.0, dawdle: 0.15, useItems: true },  // careful but decisive
+  easy:   { caution: 0.0, dawdle: 0.6, useItems: false, avoidGaze: false },
+  medium: { caution: 1.0, dawdle: 0.4, useItems: true,  avoidGaze: false },
+  hard:   { caution: 1.0, dawdle: 0.0, useItems: true,  avoidGaze: false },
 });
-
 // How far off-route the AI will detour to grab a pickup. MEASURED, not
 // guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
 // -> 38/32/10% easy/medium/hard over 150 games/tier), and setting it to 0
@@ -168,7 +182,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
-    const avoid = committed ? null : buildAvoidSet(game);
+    const avoid = committed ? null : buildAvoidSet(game, tune.avoidGaze);
     const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
     const path = bfsPath(game.map, p.x, p.y, goal.x, goal.y, avoid);
     if (!path || path.length < 2) break;
@@ -232,7 +246,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   return { steps: stepsThisTurn, path: walked, from: startPos };
 }
 
-function buildAvoidSet(game) {
+function buildAvoidSet(game, avoidGaze) {
   // Soft-avoid every currently dangerous tile. bfsPath falls back to ignoring
   // this set if no safe route exists, so it never deadlocks.
   const set = new Set();
@@ -246,6 +260,18 @@ function buildAvoidSet(game) {
         const ty = l.y + yy;
         if (tx < 0 || ty < 0 || tx >= size || ty >= size) continue;
         if (dangerous(game, tx, ty)) set.add(`${tx},${ty}`);
+      }
+    }
+  }
+  // A skilled prisoner treats the whole watched quadrant as risky, not just
+  // the tiles that happen to be lit inside it — the gaze is the thing that
+  // will still be pointing there next turn. bfsPath falls back to ignoring
+  // the set entirely when no route avoids it, so this can never deadlock.
+  if (avoidGaze) {
+    const g = game.watcher;
+    for (let yy = 0; yy < size; yy++) {
+      for (let xx = 0; xx < size; xx++) {
+        if (inWatcherGaze(game, g.facing, xx, yy)) set.add(`${xx},${yy}`);
       }
     }
   }
