@@ -6,10 +6,16 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=beta-0.12.0" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.13.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
+
+  <!-- Exposure vignette: a diegetic "you can be seen right now" cue for the
+       Prisoner (lit, or noisy per the current difficulty's exposure rule) —
+       replaces relying on the text log, which competes with the 3D scene
+       for attention and nobody reads mid-game. -->
+  <div id="dangerVignette" class="danger-vignette"></div>
 
   <!-- INTRO SPLASH (also the audio + gamepad unlock gesture — Chrome gates both) -->
   <div id="intro" class="screen intro">
@@ -148,6 +154,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js?v=beta-0.12.0"></script>
+  <script type="module" src="src/main.js?v=beta-0.13.0"></script>
 </body>
 </html>

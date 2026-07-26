@@ -58,8 +58,14 @@ export class UI {
     this.el.watcherControls.classList.toggle("active", !prisonerTurn);
   }
 
-  renderLog(game) {
+  // `showWatcherInfo`: same gate as updateHud — only true for whoever is
+  // legitimately "being" the Watcher right now. A `watcherOnly` log entry
+  // (the real rotation) is dropped entirely for anyone else, not just
+  // hidden in the HUD — a text log the Prisoner could read was leaking the
+  // Watcher's true facing on every rotation.
+  renderLog(game, showWatcherInfo) {
     const html = game.log
+      .filter((l) => !l.watcherOnly || showWatcherInfo)
       .slice(0, 8)
       .map((l) => `<div class="logline"><span class="lr">R${l.round}</span> ${escapeHtml(l.msg)}</div>`)
       .join("");

@@ -291,7 +291,7 @@ export function rotateWatcher(game, delta) {
   if (game.watcher.rotatedThisTurn) return { ok: false, reason: "already-rotated" };
   game.watcher.facing = (game.watcher.facing + delta + 4) % 4;
   game.watcher.rotatedThisTurn = true;
-  logMsg(game, `Watcher turns to face ${DIRS[game.watcher.facing]}.`);
+  logMsg(game, `Watcher turns to face ${DIRS[game.watcher.facing]}.`, { watcherOnly: true });
   return { ok: true };
 }
 
@@ -314,7 +314,7 @@ export function setBluff(game, dir) {
 //  - medium: lit OR standing on a fresh noise tile (original rule).
 //  - hard:   lit OR noise on/adjacent (within 1 tile) — sound alone can
 //            doom you if you're careless nearby, not just on the exact tile.
-function isExposed(game, x, y, difficulty) {
+export function isExposed(game, x, y, difficulty) {
   if (isLit(game, x, y)) return true;
   if (difficulty === "easy") return false;
   if (difficulty === "hard") return noiseNear(game, x, y, 1);
@@ -406,8 +406,15 @@ export function noiseAt(game, x, y) {
   return game.noise.some((n) => n.x === x && n.y === y);
 }
 
-function logMsg(game, msg) {
-  game.log.unshift({ round: game.round, msg });
+// `watcherOnly`: true for an entry that reveals the Watcher's TRUE state
+// (currently just the real facing on rotate) — the log has no per-viewer
+// filtering of its own, so this flag is how ui.js's renderLog keeps a
+// Prisoner-role viewer from reading the one thing the whole game hides from
+// them. The Watcher's bluff *declaration* is deliberately NOT flagged: that
+// claim is meant to be public (it's the paranoia mechanic), only the real
+// rotation is secret.
+function logMsg(game, msg, opts = {}) {
+  game.log.unshift({ round: game.round, msg, watcherOnly: !!opts.watcherOnly });
   if (game.log.length > 60) game.log.pop();
 }
 
