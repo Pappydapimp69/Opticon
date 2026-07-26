@@ -32,11 +32,16 @@ const server = http.createServer((req, res) => {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
-  await page.keyboard.press("Enter"); await page.waitForTimeout(700);
+  await page.keyboard.down("Space"); await page.waitForTimeout(750); await page.keyboard.up("Space");
+  await page.waitForTimeout(300);
   await page.click('[data-diff="medium"]');
   await page.waitForTimeout(200);
   await page.click("#playWatcher"); // human watcher => watcher view, reveals structure
   await page.waitForTimeout(200);
+  await page.hover("#btnStart");
+  await page.mouse.down();
+  await page.waitForTimeout(750);
+  await page.mouse.up();
   await page.waitForTimeout(1000);
 
   // Force each view and screenshot.

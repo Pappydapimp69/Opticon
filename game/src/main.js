@@ -23,7 +23,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.13.0";
+const BUILD = "beta-0.14.0";
 
 const app = {
   renderer: null,
@@ -78,7 +78,6 @@ function boot() {
   app.audio = new Audio();
   app.ui = new UI(document.body);
   app.input = new Input(handleIntent, { onScheme: onSchemeChange });
-  app.input.setIntroHandler(dismissIntro);
   app.input.setPassHandler(dismissPassDevice);
   app.input.setMenuHandlers(menuNavX, menuNavY, menuSelect, menuBack);
 
@@ -88,8 +87,24 @@ function boot() {
     if (typeof saved.volume === "number") app.audio.volume = Math.max(0, Math.min(1, saved.volume));
   }
 
+  // Intro + menu Start both require a HOLD, not a tap/click — touch/mouse
+  // don't go through the row/col focus system at all, so they get their own
+  // plain pointerdown/up flags, polled alongside keyboard/gamepad each frame
+  // in pollIntroHold()/pollStartHold() (see loop()).
   const introEl = document.getElementById("intro");
-  if (introEl) introEl.addEventListener("pointerdown", dismissIntro);
+  if (introEl) {
+    introEl.addEventListener("pointerdown", () => { introPointerDown = true; });
+    introEl.addEventListener("pointerup", () => { introPointerDown = false; });
+    introEl.addEventListener("pointercancel", () => { introPointerDown = false; });
+    introEl.addEventListener("pointerleave", () => { introPointerDown = false; });
+  }
+  const startEl = document.getElementById("btnStart");
+  if (startEl) {
+    startEl.addEventListener("pointerdown", () => { startPointerDown = true; });
+    startEl.addEventListener("pointerup", () => { startPointerDown = false; });
+    startEl.addEventListener("pointercancel", () => { startPointerDown = false; });
+    startEl.addEventListener("pointerleave", () => { startPointerDown = false; });
+  }
   const passEl = document.getElementById("passDevice");
   if (passEl) passEl.addEventListener("pointerdown", dismissPassDevice);
 
@@ -118,12 +133,14 @@ function boot() {
 // press-and-hold "start" — that had no resume path, so opening the menu
 // mid-game (or from the game-over screen) abandoned the current run and the
 // ONLY way back into play was completing the whole flow again, generating a
-// brand-new game every time. Removed per explicit feedback. What's kept: the
-// row/col-aware nav (so up/down/left/right still can't wander from the
-// difficulty row onto a play button by accident — that part of the original
-// fix was real and worth keeping) and a safe default focus (Medium, not a
-// play button). What's gone: stage locking and the hold requirement — a
-// single click/confirm on a play button starts immediately again.
+// brand-new game every time. Removed per explicit feedback, then
+// reintroduced here in a form that avoids that flaw: selecting a play mode
+// now only records app.config and moves focus to a Start button — it never
+// calls startGame() itself, so re-opening the menu mid-game via btnMenu still
+// just shows the (harmless, re-selectable) menu state, exactly as before.
+// Only actually HOLDING the Start button starts a new game. Row/col-aware
+// nav (so up/down/left/right can't wander onto the wrong control) and the
+// safe default focus (Medium, not a play button) are unchanged.
 
 const menu = { row: 0, col: 1 }; // col:1 = Medium — the default focus, never a play button
 let introDone = false;
@@ -148,6 +165,68 @@ function dismissIntro() {
     setTimeout(() => intro.classList.add("hidden"), 520);
   }
   openMenu();
+}
+
+// ---- Hold-to-confirm: intro splash + menu Start button --------------------
+// Both need a device-spanning "held for N ms" check: keyboard via
+// input.isHeld(code), gamepad via input.isPadHeld(i), and touch/mouse via a
+// plain pointerdown/up flag (touch doesn't go through the row/col focus
+// system). This is polled once per animation frame in loop() rather than
+// dispatched from input.js, since "held" isn't an edge/event the way a
+// keydown or button-press is — it's a continuous state over time.
+const HOLD_MS = 650;
+let introHeldSince = null;
+let introPointerDown = false;
+let startHeldSince = null;
+let startPointerDown = false;
+
+function pollIntroHold(t) {
+  if (introDone) return;
+  const fill = document.getElementById("introHoldFill");
+  const held = app.input.isHeld("Space") || app.input.isPadHeld(2) || introPointerDown;
+  if (held) {
+    if (introHeldSince == null) introHeldSince = t;
+    const p = Math.min(1, (t - introHeldSince) / HOLD_MS);
+    if (fill) fill.style.width = `${p * 100}%`;
+    if (p >= 1) dismissIntro();
+  } else {
+    introHeldSince = null;
+    if (fill) fill.style.width = "0%";
+  }
+}
+
+function pollStartHold(t) {
+  const btn = document.getElementById("btnStart");
+  const fill = document.getElementById("startHoldFill");
+  if (!btn) return;
+  if (app.input.mode !== "menu") {
+    startHeldSince = null;
+    if (fill) fill.style.width = "0%";
+    btn.classList.remove("charging");
+    return;
+  }
+  const focusedOnStart = currentFocusEl() === btn;
+  const held =
+    startPointerDown ||
+    (focusedOnStart && (app.input.isHeld("Space") || app.input.isHeld("Enter") || app.input.isPadHeld(0)));
+  if (held) {
+    if (startHeldSince == null) startHeldSince = t;
+    const p = Math.min(1, (t - startHeldSince) / HOLD_MS);
+    if (fill) fill.style.width = `${p * 100}%`;
+    btn.classList.add("charging");
+    if (p >= 1) {
+      startHeldSince = null;
+      if (fill) fill.style.width = "0%";
+      btn.classList.remove("charging");
+      app.audio.resume();
+      app.audio.play("ui");
+      startGame(app.config);
+    }
+  } else {
+    startHeldSince = null;
+    if (fill) fill.style.width = "0%";
+    btn.classList.remove("charging");
+  }
 }
 
 // Hotseat pass-the-device gate: a turn switch happens instantly in game
@@ -201,6 +280,8 @@ function openMenu() {
   if (menu.col < 0) menu.col = 1;
   menuFocusApply();
   applyVolumeUI(); // pick up a mid-game HUD mute toggle if one happened
+  document.querySelectorAll(".play-btn").forEach((x) => x.classList.remove("sel"));
+  updateStartLabel(); // reflect current app.config even if reopened mid-game
 }
 
 function menuElements() {
@@ -255,7 +336,11 @@ function menuNavY(delta) {
 
 function menuSelect() {
   const cur = currentFocusEl();
-  if (cur) cur.click();
+  if (!cur) return;
+  // Start requires a HOLD (tracked every frame in pollStartHold), not an
+  // edge-triggered click — a single A-press here must not start the game.
+  if (cur.id === "btnStart") return;
+  cur.click();
 }
 
 function menuBack() {} // no stages to back out of anymore; kept as a no-op so input.js's binding stays valid
@@ -299,14 +384,19 @@ function wireMenu() {
     saveSettings();
   });
 
-  // Play type: selecting ALSO starts the game immediately (single click or
-  // confirm) — this is the direct, no-friction path back into play.
+  // Play type: selecting records app.config and moves focus to the Start
+  // row — it does NOT start the game itself (see the NOTE above).
   const modeBind = (id, overrides) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener("click", () => {
       app.audio.resume(); app.audio.play("ui");
-      startGame(overrides);
+      document.querySelectorAll(".play-btn").forEach((x) => x.classList.remove("sel"));
+      el.classList.add("sel");
+      Object.assign(app.config, overrides);
+      saveSettings();
+      updateStartLabel();
+      focusStartRow();
     });
   };
   modeBind("playPrisoner", { humanRole: "Prisoner", mode: "single" });
@@ -324,6 +414,27 @@ function wireMenu() {
   if (buildEl) buildEl.textContent = BUILD;
 
   applyVolumeUI(); // reflect whatever setting boot() loaded (saved or default)
+  updateStartLabel();
+}
+
+// data-row of the menu's Start button — kept as one constant since both
+// focusStartRow() and pollStartHold() need the same value.
+const START_ROW = 4;
+
+function focusStartRow() {
+  menu.row = START_ROW;
+  menu.col = 0;
+  menuFocusApply();
+}
+
+// Reflects whichever play mode is currently selected (or was already active,
+// if the menu was reopened mid-game via btnMenu) on the Start button, so
+// holding it is never a guess about what's about to launch.
+function updateStartLabel() {
+  const el = document.getElementById("startLabel");
+  if (!el) return;
+  const label = app.config.mode === "hotseat" ? "2P Hotseat" : app.config.humanRole;
+  el.textContent = `Hold to Start — ${label}`;
 }
 
 // Keep the menu's Off/Low/Medium/Full buttons and the HUD mute icon in sync
@@ -743,6 +854,8 @@ function loop(t) {
   const dt = Math.min(0.05, (t - app.lastT) / 1000 || 0);
   app.lastT = t;
   if (app.input) app.input.pollGamepad();
+  pollIntroHold(t);
+  pollStartHold(t);
   updateDangerVignette();
   // Safety net: a staged path only makes sense during the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") resetStagedPath();

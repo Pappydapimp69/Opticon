@@ -89,6 +89,27 @@ html, body {
 .hotseat-btn:hover { border-color: #a0b6ff; }
 .play-btn.ghost { background: transparent; align-items: center; }
 
+/* ---- Hold-to-confirm (intro splash + menu Start button) ---- */
+.hold-track {
+  position: relative; width: 100%; height: 6px; border-radius: 4px; overflow: hidden;
+  background: rgba(255,255,255,0.08); margin-top: 10px;
+}
+.intro-inner .hold-track { width: 220px; max-width: 70vw; }
+.hold-fill {
+  position: absolute; inset: 0; width: 0%;
+  background: linear-gradient(90deg, var(--prisoner), #a0b6ff);
+  transition: width 0.05s linear;
+}
+.start-btn {
+  width: 100%; padding: 16px; border-radius: 12px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--line); color: var(--text);
+  font-family: inherit; font-size: 17px; font-weight: 700; letter-spacing: 1px;
+  text-align: center;
+}
+.start-btn:hover { background: rgba(255,255,255,0.1); border-color: var(--prisoner); }
+.start-btn.charging { border-color: var(--prisoner); }
+.start-hold-track { height: 8px; }
+
 .how { margin-top: 12px; font-size: 13px; color: var(--muted); }
 .how summary { cursor: pointer; color: var(--text); padding: 6px 0; }
 .how ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.5; }

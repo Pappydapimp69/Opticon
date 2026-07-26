@@ -51,9 +51,14 @@ function check(cond, label) {
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
-  await page.keyboard.press("Enter");
+  await page.keyboard.down("Space"); await page.waitForTimeout(750); await page.keyboard.up("Space");
   await page.waitForTimeout(500);
   await page.click("#playPrisoner");
+  await page.waitForTimeout(200);
+  await page.hover("#btnStart");
+  await page.mouse.down();
+  await page.waitForTimeout(750);
+  await page.mouse.up();
   await page.waitForTimeout(300);
 
   // Force the prisoner onto a lit tile (deterministic exposure) and let a
