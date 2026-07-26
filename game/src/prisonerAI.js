@@ -45,6 +45,30 @@ function dirBetween(ax, ay, bx, by) {
 // cautious AI could in principle stall a human Watcher's game forever).
 const STALL_LIMIT = 3;
 
+// Prisoner-AI competence tiers. These exist so difficulty can describe the
+// HUMAN'S OPPOSITION in Watcher mode, instead of leaning on the capture
+// rule — which is symmetric and therefore gifts whoever holds the tower
+// (measured in sandbox/t25-difficulty-semantics.mjs: the exposure rule
+// swings capture ~13pts easy->hard while Watcher behaviour swings ~3, so a
+// human Watcher on "hard" was being handed an EASIER job).
+//   caution  — chance of refusing to end a turn on a catchable tile
+//   dawdle   — chance of halting at 2 tiles instead of pressing on
+//   useItems — whether it bothers spending pickups at all
+//
+// NOTE the direction of `dawdle`: a FIRST pass at these tiers gave the
+// "hard" prisoner MORE stopping discipline, on the theory that moving less
+// means being heard less. The sandbox refuted it — capture went UP with
+// difficulty (61/62/64%), the wrong way round. Halting costs tempo, and
+// tempo is the scarce resource here (same finding as the item-detour
+// measurement): every extra round spent creeping is another Watcher scan.
+// So the competent prisoner PUSHES and spends a muffle to cover the noise;
+// the careless one dawdles in the open.
+export const PRISONER_SKILL = Object.freeze({
+  easy:   { caution: 0.0, dawdle: 0.8,  useItems: false }, // reckless AND slow
+  medium: { caution: 1.0, dawdle: 0.4,  useItems: true },  // the original behaviour
+  hard:   { caution: 1.0, dawdle: 0.15, useItems: true },  // careful but decisive
+});
+
 // How far off-route the AI will detour to grab a pickup. MEASURED, not
 // guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
 // -> 38/32/10% easy/medium/hard over 150 games/tier), and setting it to 0
@@ -117,10 +141,11 @@ function useItemsOpportunistically(game, p, committed, rng) {
 
 // Play one full prisoner turn (does NOT end the turn; caller does that).
 // rng: optional () => [0,1) for tie-breaking variety.
-export function prisonerAITurn(game, rng = Math.random) {
+export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   const p = game.prisoners[game.activePrisoner];
   const exit = game.map.exit;
   const startPos = { x: p.x, y: p.y };
+  const tune = PRISONER_SKILL[skill] || PRISONER_SKILL.medium;
   let stepsThisTurn = 0;
   // Every tile actually entered this turn, in order. The renderer needs the
   // real sequence to step the avatar through it — without this an AI turn
@@ -135,11 +160,11 @@ export function prisonerAITurn(game, rng = Math.random) {
   // stalemate can never persist indefinitely.
   const committed = p.stalledTurns >= STALL_LIMIT;
 
-  useItemsOpportunistically(game, p, committed, rng);
+  if (tune.useItems) useItemsOpportunistically(game, p, committed, rng);
 
   // A short detour to a pickup, but never while committed — the whole point
   // of the commit state is that it stops making side trips.
-  const detour = committed ? null : nearbyItem(game, p);
+  const detour = committed || !tune.useItems ? null : nearbyItem(game, p);
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
@@ -155,7 +180,7 @@ export function prisonerAITurn(game, rng = Math.random) {
     // If stepping there would strand us on a dangerous tile AND we've already
     // moved (so we can safely stop without wasting the turn), hold position —
     // unless we've committed, in which case danger no longer holds us back.
-    if (!committed) {
+    if (!committed && rng() < tune.caution) {
       const endsDangerous = dangerous(game, next.x, next.y);
       const nearExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y) <= 2;
       if (endsDangerous && stepsThisTurn >= 1 && !nearExit) break;
@@ -188,7 +213,7 @@ export function prisonerAITurn(game, rng = Math.random) {
     // the movement-noise reveal doesn't paint a long trail. Near the exit, or
     // once committed, push through instead.
     const distExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y);
-    if (!committed && stepsThisTurn >= 2 && distExit > 3 && rng() < 0.4) break;
+    if (!committed && stepsThisTurn >= 2 && distExit > 3 && rng() < tune.dawdle) break;
   }
 
   // Track genuine progress against the BEST distance ever reached, not just
