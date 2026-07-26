@@ -24,7 +24,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.20.0";
+const BUILD = "beta-0.21.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -294,8 +294,12 @@ function openMenu() {
   updateStartLabel(); // reflect current app.config even if reopened mid-game
 }
 
+// Same row/col grid nav drives both the main menu AND the game-over overlay
+// (two different screens, same "is this a gamepad-focusable grid" shape) —
+// scope the query to whichever one is actually showing.
 function menuElements() {
-  return Array.from(document.querySelectorAll("#menu [data-row]"));
+  const root = app.input && app.input.mode === "overlay" ? "#overlay" : "#menu";
+  return Array.from(document.querySelectorAll(`${root} [data-row]`));
 }
 
 function currentFocusEl() {
@@ -957,7 +961,17 @@ function checkOver() {
     app.running = false;
     if (g.winner === "Prisoner") app.audio.play("escape");
     else app.audio.play("caught");
-    setTimeout(() => app.ui.gameOver(g, { difficulty: app.config.difficulty }), 700);
+    setTimeout(() => {
+      app.ui.gameOver(g, { difficulty: app.config.difficulty });
+      // The overlay's buttons weren't reachable by gamepad/keyboard at all —
+      // input.mode stayed "game" (no screen change ever set it), so a
+      // gamepad press just fired stale game intents into a game that had
+      // already ended. Give the overlay the same row/col grid nav as menu.
+      app.input.mode = "overlay";
+      menu.row = 0;
+      menu.col = 0;
+      menuFocusApply();
+    }, 700);
   }
 }
 
