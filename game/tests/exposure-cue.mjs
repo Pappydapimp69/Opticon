@@ -106,8 +106,18 @@ function check(cond, label) {
   // role viewer (the bluff "declares eyes on" line is fine and expected).
   await page.keyboard.press("Space"); // end prisoner turn -> AI watcher acts
   await page.waitForTimeout(1200);
-  const logText = await page.$eval("#log", (el) => el.textContent);
-  check(!/turns to face/.test(logText), `log never leaks the Watcher's real rotation to the Prisoner (log: "${logText.slice(0, 200)}")`);
+  // The on-screen log was removed from the HUD, so the leak guard now
+  // checks the SOURCE of truth: what renderLog() would hand a Prisoner-role
+  // viewer, plus that no Watcher-only text reached the visible HUD anywhere.
+  const leak = await page.evaluate(() => {
+    const a = window.__opticon;
+    const visible = a.ui.renderLog(a.game, false).map((l) => l.msg).join(" ");
+    const anyRotation = a.game.log.some((l) => /turns to face/.test(l.msg));
+    return { visible, anyRotation, hud: document.getElementById("hud").textContent };
+  });
+  check(leak.anyRotation, "the Watcher did rotate (so this assertion has teeth)");
+  check(!/turns to face/.test(leak.visible), `renderLog never hands the Prisoner the real rotation (got: "${leak.visible.slice(0, 160)}")`);
+  check(!/turns to face/.test(leak.hud), "no Watcher-only text is rendered anywhere in the HUD");
 
   check(errors.length === 0, `no console errors (${errors.length} found)`);
   errors.slice(0, 10).forEach((e) => console.log("    •", e));

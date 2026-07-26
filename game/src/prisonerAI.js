@@ -120,7 +120,13 @@ function useItemsOpportunistically(game, p, committed, rng) {
 export function prisonerAITurn(game, rng = Math.random) {
   const p = game.prisoners[game.activePrisoner];
   const exit = game.map.exit;
+  const startPos = { x: p.x, y: p.y };
   let stepsThisTurn = 0;
+  // Every tile actually entered this turn, in order. The renderer needs the
+  // real sequence to step the avatar through it — without this an AI turn
+  // resolves instantly in the sim and the avatar just slides to the end
+  // point, so companions read as teleporting rather than moving.
+  const walked = [];
   const distBefore = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y);
 
   // Once stalled too many turns in a row, drop caution entirely: no avoid
@@ -175,6 +181,7 @@ export function prisonerAITurn(game, rng = Math.random) {
       break;
     }
     stepsThisTurn++;
+    walked.push({ x: p.x, y: p.y, event: r.event });
     if (r.event === "exit") break;
 
     // Quiet discipline when far from the exit: sometimes stop after 2 tiles so
@@ -197,7 +204,7 @@ export function prisonerAITurn(game, rng = Math.random) {
     p.stalledTurns += 1;
   }
 
-  return stepsThisTurn;
+  return { steps: stepsThisTurn, path: walked, from: startPos };
 }
 
 function buildAvoidSet(game) {

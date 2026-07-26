@@ -15,7 +15,6 @@ export class UI {
       mp: document.getElementById("mpLabel"),
       round: document.getElementById("roundLabel"),
       view: document.getElementById("viewLabel"),
-      log: document.getElementById("log"),
       overlay: document.getElementById("overlay"),
       overlayTitle: document.getElementById("overlayTitle"),
       overlayText: document.getElementById("overlayText"),
@@ -73,13 +72,14 @@ export class UI {
   // (the real rotation) is dropped entirely for anyone else, not just
   // hidden in the HUD — a text log the Prisoner could read was leaking the
   // Watcher's true facing on every rotation.
+  // The scrolling event log was removed from the HUD: it competed with the
+  // 3D scene for attention and players reported never reading it. The
+  // banner + exposure vignette + noise pings carry the same information
+  // diegetically. game.log is still maintained in rules.js (it's the
+  // authoritative event record the tests assert against, and the
+  // `watcherOnly` filtering below is the leak guard), it just isn't drawn.
   renderLog(game, showWatcherInfo) {
-    const html = game.log
-      .filter((l) => !l.watcherOnly || showWatcherInfo)
-      .slice(0, 8)
-      .map((l) => `<div class="logline"><span class="lr">R${l.round}</span> ${escapeHtml(l.msg)}</div>`)
-      .join("");
-    this.el.log.innerHTML = html;
+    return game.log.filter((l) => !l.watcherOnly || showWatcherInfo);
   }
 
   banner(text, cls = "") {
