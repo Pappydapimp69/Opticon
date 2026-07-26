@@ -1,7 +1,7 @@
 // main.js — Opticon 3D entry point. Wires map + rules + AI + render + input + UI
 // into a playable game: menu → play (single-player vs AI, or hotseat) → game over.
 
-import { generateMap, DIR_VEC, OBJ } from "./map.js";
+import { generateMap, MAP_DEFAULTS, DIR_VEC, OBJ } from "./map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -24,7 +24,15 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.15.0";
+const BUILD = "beta-0.16.0";
+
+// AI companions: single-player modes field a small GROUP of prisoners (the
+// design doc's "Population Scaling" — more prisoners means more paranoia,
+// since the Watcher's limited actions have to spread across all of them),
+// not just the human/single AI opponent. Hotseat stays 1-vs-1 — pass-the-
+// device secrecy for a whole GROUP of human-controlled prisoners is a much
+// bigger UX problem than this pass takes on.
+const PRISONER_COUNT = 3;
 
 const app = {
   renderer: null,
@@ -457,9 +465,11 @@ function startGame(overrides = {}) {
   updateBreakToggleUI();
   // Fresh seed each game for variety, but reproducible within a game.
   app.config.seed = (Math.floor(Math.random() * 1e9) >>> 0) || 1;
-  const map = generateMap(app.config.seed);
-  app.game = createGame(map, { watcherFacing: 0 });
+  const prisonerCount = app.config.mode === "hotseat" ? 1 : PRISONER_COUNT;
+  const map = generateMap(app.config.seed, { ...MAP_DEFAULTS, prisonerCount });
+  app.game = createGame(map, { watcherFacing: 0, prisoners: map.spawns });
   app.game.prisoners.forEach((p) => (p.mpMax = 3));
+  animatingPrisoner = 0;
 
   app.renderer.buildWorld(app.game);
   app.viewMode = app.config.humanRole === "Watcher" ? "watcher" : "prisoner";
@@ -551,8 +561,15 @@ function handleIntent(intent, arg) {
   app.ui.renderLog(g, shouldShowWatcherInfo());
 }
 
+// With multiple prisoners, "is the CURRENTLY active prisoner human?" is not
+// the same question as "did the human pick the Prisoner role" — a human
+// Prisoner player always controls prisoner 0 specifically; any companion
+// (prisoner index > 0) is AI-controlled even in that same mode.
 function humanControlsPrisoner() {
-  return app.config.mode === "hotseat" || app.config.humanRole === "Prisoner";
+  if (app.config.mode === "hotseat") return true; // hotseat is always exactly 1 prisoner
+  if (app.config.humanRole !== "Prisoner") return false; // human plays Watcher; every prisoner is AI
+  const g = app.game;
+  return !g || g.activePrisoner === 0;
 }
 function humanControlsWatcher() {
   return app.config.mode === "hotseat" || app.config.humanRole === "Watcher";
@@ -562,6 +579,12 @@ function humanControlsWatcher() {
 // as a break instead of a move — cleared the moment it's used (or the turn
 // changes), so it can never linger and silently reinterpret a later tap.
 let breakArmed = false;
+
+// Which prisoner's avatar is (or was last) mid walk-animation — each
+// prisoner now has its own independent walk queue in the renderer, so
+// checking "is the walk finished" needs to know WHICH one, not just
+// whether some single shared queue is empty.
+let animatingPrisoner = 0;
 function updateBreakToggleUI() {
   const btn = document.getElementById("breakToggle");
   if (btn) btn.classList.toggle("armed", breakArmed);
@@ -700,7 +723,8 @@ function commitStagedPath() {
     walkSteps.push({ x: p.x, y: p.y, event: r.event });
   }
   app.stagedPath = [];
-  app.renderer.walkTo(fromTile, walkSteps);
+  animatingPrisoner = g.activePrisoner;
+  app.renderer.walkTo(animatingPrisoner, fromTile, walkSteps);
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
@@ -754,8 +778,9 @@ function handleWatcherIntent(intent, arg) {
     if (app.config.mode === "hotseat") {
       showPassDevice(); // block the view until the Prisoner's player confirms
     } else {
-      if (app.config.humanRole === "Watcher") {
-        // AI prisoner takes its turn now.
+      // Whichever prisoner is active now (human plays only prisoner 0 — any
+      // companion, or every prisoner in single-player Watcher mode, is AI).
+      if (!isOver(g) && !humanControlsPrisoner()) {
         scheduleAiPrisoner();
       }
       app.ui.hint(hintFor());
@@ -791,7 +816,16 @@ function scheduleAiWatcher() {
     checkOver();
     app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
     app.ui.renderLog(g, shouldShowWatcherInfo());
-    if (!isOver(g)) app.ui.banner("Your move", "prisoner");
+    // playWatcherTurn already advanced to the next prisoner internally — if
+    // that's a companion (not prisoner 0), its AI turn plays automatically
+    // too, rather than silently waiting on input that will never come.
+    if (!isOver(g)) {
+      if (humanControlsPrisoner()) {
+        app.ui.banner("Your move", "prisoner");
+      } else {
+        scheduleAiPrisoner();
+      }
+    }
     app.ui.hint(hintFor());
   updateCommitButton();
   }, 750);
@@ -810,7 +844,16 @@ function scheduleAiPrisoner() {
     checkOver();
     app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
     app.ui.renderLog(g, shouldShowWatcherInfo());
-    if (!isOver(g)) app.ui.banner("Watcher's turn — your move", "watcher");
+    // endPrisonerTurn always hands off to the Watcher — but with AI
+    // companions, this can fire in single-player Prisoner mode too, where
+    // the Watcher is ALSO AI, not the human waiting on this banner.
+    if (!isOver(g)) {
+      if (humanControlsWatcher()) {
+        app.ui.banner("Watcher's turn — your move", "watcher");
+      } else {
+        scheduleAiWatcher();
+      }
+    }
     app.ui.hint(hintFor());
   updateCommitButton();
   }, 650);
@@ -935,7 +978,8 @@ function loop(t) {
       // Only check game-over once the whole committed path has finished
       // walking — an escape shouldn't end the game before you've visibly
       // reached the gate.
-      if (app.renderer.walk.queue.length === 0) checkOver();
+      const animAvatar = app.renderer.avatars[animatingPrisoner];
+      if (!animAvatar || animAvatar.walk.queue.length === 0) checkOver();
     }
   } else if (app.renderer) {
     app.renderer.renderOnce();

@@ -52,6 +52,7 @@ export const MAP_DEFAULTS = Object.freeze({
   ringCount: 4,
   ringThickness: 3,
   border: 1, // outer bounding wall thickness
+  prisonerCount: 1, // how many spawn points to place (map.spawns); map.spawn stays the primary one either way
 });
 
 export function computeGridSize(cfg = MAP_DEFAULTS) {
@@ -134,8 +135,13 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
   // --- Exit gate: on the outer edge of the outermost ring, one cardinal side.
   const exit = placeExit(tiles, objects, ring, size, c, cfg, rng);
 
-  // --- Prisoner spawn: outermost ring, opposite side from the exit.
-  const spawn = placeSpawn(tiles, objects, ring, size, c, cfg, exit);
+  // --- Prisoner spawn(s): outermost ring, opposite side from the exit. All
+  // additional spawns (for prisonerCount > 1) are placed via a floor-only
+  // BFS from the primary spawn, so they land in the SAME connected
+  // component by construction — ensureConnected below only needs to
+  // guarantee the primary spawn reaches the exit for all of them to.
+  const spawns = placeSpawns(tiles, objects, ring, size, c, cfg, exit, cfg.prisonerCount || 1);
+  const spawn = spawns[0];
 
   // Repair connectivity: guarantee spawn can reach exit (flood fill; carve if needed).
   ensureConnected(tiles, objects, size, spawn, exit);
@@ -153,7 +159,8 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
     lights, // [{x,y,group,radius}]
     lightState: lights.reduce((m, l) => ((m[l.group] = true), m), {}), // group -> on/off
     exit, // {x,y}
-    spawn, // {x,y}
+    spawn, // {x,y} — the primary spawn, unchanged shape for existing callers
+    spawns, // [{x,y}, ...] — length === cfg.prisonerCount, spawns[0] === spawn
     ringCount: cfg.ringCount,
   };
 }
@@ -286,6 +293,42 @@ function placeSpawn(tiles, objects, ring, size, c, cfg, exit) {
   tiles[y][x] = TILE.FLOOR;
   if (objects[y][x] === OBJ.DOOR || objects[y][x] === OBJ.LIGHT) objects[y][x] = OBJ.NONE;
   return { x, y };
+}
+
+// Places `count` spawn points: the primary one via placeSpawn, then the
+// group's remaining members via a floor-only BFS outward from it — the
+// group starts together in one cluster, not scattered across the map, and
+// every additional spawn lands on plain open floor (never a switch/lamp/
+// exit tile another prisoner or the map itself depends on).
+function placeSpawns(tiles, objects, ring, size, c, cfg, exit, count) {
+  const primary = placeSpawn(tiles, objects, ring, size, c, cfg, exit);
+  const spawns = [primary];
+  if (count <= 1) return spawns;
+
+  const seen = new Set([`${primary.x},${primary.y}`]);
+  const queue = [primary];
+  while (spawns.length < count && queue.length) {
+    const cur = queue.shift();
+    for (const { dx, dy } of DIR_VEC) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (!inBounds(nx, ny, size)) continue;
+      const key = `${nx},${ny}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (tiles[ny][nx] !== TILE.FLOOR) continue;
+      queue.push({ x: nx, y: ny });
+      if (objects[ny][nx] === OBJ.NONE) {
+        spawns.push({ x: nx, y: ny });
+        if (spawns.length >= count) break;
+      }
+    }
+  }
+  // A tight corner could run out of nearby open floor — reuse the primary
+  // tile rather than leave a slot undefined; rules.js never requires
+  // distinct starting tiles (two prisoners CAN share a spawn cell).
+  while (spawns.length < count) spawns.push({ x: primary.x, y: primary.y });
+  return spawns;
 }
 
 function randomFloorInRing(tiles, objects, ring, size, rIdx, rng) {
