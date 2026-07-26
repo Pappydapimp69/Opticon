@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.9.0";
+const BUILD = "beta-0.10.0";
 
 const app = {
   renderer: null,
