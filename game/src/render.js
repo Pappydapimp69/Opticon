@@ -27,6 +27,7 @@ const COLORS = {
   bluff: 0xf7c14a,
   noise: 0xff5757,
   pathPreview: 0xf5e6a8,
+  item: 0xffc75a,
   captureFlash: 0xffffff,
 };
 
@@ -224,7 +225,7 @@ export class Renderer {
     this.scene.add(towerGroup);
 
     // --- Props (doors, windows, switches, lamps, exit) as small meshes.
-    this.props = { doors: new Map(), windows: new Map(), switches: [], lamps: new Map(), exit: null };
+    this.props = { doors: new Map(), windows: new Map(), switches: [], lamps: new Map(), items: new Map(), exit: null };
     const propGroup = new THREE.Group();
 
     for (let y = 0; y < size; y++) {
@@ -254,6 +255,19 @@ export class Renderer {
           wmesh.position.set(wx, WALL_H * 0.46, wz);
           propGroup.add(wmesh);
           this.props.windows.set(`${x},${y}`, wmesh);
+        } else if (o === OBJ.ITEM) {
+          // A small floating, spinning cache — reads as "grab this" at a
+          // glance without needing a label at ground level.
+          const it = new THREE.Mesh(
+            new THREE.OctahedronGeometry(0.22),
+            new THREE.MeshBasicMaterial({ color: COLORS.item })
+          );
+          it.position.set(wx, 0.45, wz);
+          propGroup.add(it);
+          const glow = new THREE.PointLight(COLORS.item, 0.5, 3.2, 2);
+          glow.position.set(wx, 0.5, wz);
+          propGroup.add(glow);
+          this.props.items.set(`${x},${y}`, { mesh: it, light: glow });
         } else if (o === OBJ.SWITCH) {
           const s = new THREE.Mesh(
             new THREE.BoxGeometry(0.22, 0.5, 0.22),
@@ -600,6 +614,19 @@ export class Renderer {
       const [dx, dy] = k.split(",").map(Number);
       const open = game.openedDoors.has(dy * map.size + dx);
       mesh.visible = !open;
+    }
+
+    // Items: spin/bob while present, vanish the moment they're collected
+    // (game.takenItems is the authority — the visual never gates the pickup).
+    for (const [k, it] of this.props.items) {
+      const [ix, iy] = k.split(",").map(Number);
+      const gone = game.takenItems && game.takenItems.has(iy * map.size + ix);
+      it.mesh.visible = !gone;
+      it.light.visible = !gone;
+      if (!gone) {
+        it.mesh.rotation.y = this.time * 1.6;
+        it.mesh.position.y = 0.45 + Math.sin(this.time * 2.4 + ix) * 0.07;
+      }
     }
 
     // Windows: hide the pane once broken (permanent — unlike a door, never

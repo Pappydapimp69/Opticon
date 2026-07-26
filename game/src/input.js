@@ -93,7 +93,13 @@ export class Input {
       ArrowLeft: moveOrBreak(3), KeyA: moveOrBreak(3),
       Space: () => this.onIntent("endTurn"), Enter: () => this.onIntent("endTurn"),
       KeyQ: () => this.onIntent("rotate", -1), KeyE: () => this.onIntent("rotate", 1),
-      Digit1: () => this.onIntent("bluff", 0), Digit2: () => this.onIntent("bluff", 1),
+      // 1-4 are overloaded by side, which never collides: only one role's
+      // intents are recognized per turn (see main.js's
+      // handlePrisonerIntent / handleWatcherIntent split), so on the
+      // Prisoner's turn these select an inventory slot, and on the
+      // Watcher's they declare a bluff direction.
+      Digit1: () => { this.onIntent("item", 0); this.onIntent("bluff", 0); },
+      Digit2: () => { this.onIntent("item", 1); this.onIntent("bluff", 1); },
       Digit3: () => this.onIntent("bluff", 2), Digit4: () => this.onIntent("bluff", 3),
       Tab: () => this.onIntent("cycleView"), KeyV: () => this.onIntent("cycleView"),
       KeyR: () => this.onIntent("restart"),

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=beta-0.21.0" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.22.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -88,6 +88,7 @@
         <ul>
           <li><b>Prisoner</b> — Move up to 3 tiles/turn (WASD / arrows). One step is quiet; 2+ tiles in a turn leaves <b>noise</b> behind — a red pulse the Watcher can see. A <b>red screen edge + heartbeat</b> means the Watcher's gaze covers you RIGHT NOW while you're lit or noisy — that's the danger signal, not the text log. Break a window for a loud shortcut or distraction (Shift + direction). You lead a group of 3 — teammates move on their own.</li>
           <li><b>Watcher</b> — You never see prisoners directly, only noise pings and light. Rotate your 90° gaze (Q/E), <b>bluff</b> a second claimed direction (1–4) to mislead, then <b>Space</b> to scan &amp; end your turn. Anyone caught in your TRUE gaze while lit or noisy is captured.</li>
+          <li><b>Items</b> — glowing caches on the floor; walk over one to carry it (2 max). Press <b>1</b>/<b>2</b> to use. 🔔 <b>Distraction</b> — arm it, press a direction to throw a fake noise that way. 🧣 <b>Muffle</b> — this turn's movement makes no noise. 🗝️ <b>Lockpick</b> — arm, press a direction to open that door free. ✂️ <b>Cutters</b> — arm, press a direction at a switch to kill those lights for good.</li>
           <li><b>Captured vs. escaped</b> — a captured prisoner is out; the Watcher wins once every prisoner is caught or the round limit hits. Any one prisoner reaching the gate is a Prisoner win.</li>
           <li><b>Views</b> — Press <b>V / Tab</b> to cycle Prisoner / Watcher / Overview. Drag to orbit, scroll or pinch to zoom.</li>
           <li><b>Intro cutscene</b> — a camera flythrough plays at the start of each game; press anything to skip it.</li>
@@ -116,6 +117,11 @@
     <div id="banner" class="banner"></div>
 
     <div id="log" class="log"></div>
+
+    <!-- Carried one-use items for the HUMAN's own prisoner. Rebuilt by
+         main.js's updateItemBar(); empty (and invisible) when nothing is
+         carried, so it never takes up space in the default case. -->
+    <div id="itemBar" class="item-bar empty"></div>
 
     <div id="hint" class="hint"></div>
 
@@ -166,6 +172,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js?v=beta-0.21.0"></script>
+  <script type="module" src="src/main.js?v=beta-0.22.0"></script>
 </body>
 </html>
