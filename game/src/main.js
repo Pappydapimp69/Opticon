@@ -17,6 +17,11 @@ import {
   isDoorOpen,
   isExposed,
   useItem,
+  useSkill,
+  skillUsable,
+  inWatcherGaze,
+  SKILLS,
+  SKILL_INFO,
 } from "./rules.js";
 import { playWatcherTurn } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
@@ -25,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.22.0";
+const BUILD = "beta-0.23.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -806,6 +811,107 @@ function updateItemBar() {
   });
 }
 
+// ---- Watcher skills ------------------------------------------------------
+
+// WIDE_SCAN/ECHO need no target. LOCK needs an open door — rather than
+// building a door-picker, it targets the open door nearest the Watcher's
+// current facing wedge, which is the one a player aiming that way means.
+function doUseSkill(skill) {
+  const g = app.game;
+  if (!g || g.turn !== "Watcher") return;
+  let arg = null;
+  if (skill === SKILLS.LOCK) {
+    arg = nearestOpenDoorInGaze(g);
+    if (!arg) {
+      app.audio.play("blocked");
+      return;
+    }
+  }
+  const r = useSkill(g, skill, arg);
+  if (r.ok) {
+    if (r.event === "lock") {
+      app.audio.play("blocked");
+      app.renderer.triggerPing(r.x, r.y);
+    } else if (r.event === "wide-scan") {
+      app.audio.play("scan");
+    } else {
+      app.audio.play("ui");
+    }
+  } else {
+    app.audio.play("blocked");
+  }
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+  app.ui.hint(hintFor());
+  updateCommitButton();
+}
+
+// Prefer an open door inside the true gaze wedge; fall back to the closest
+// open door anywhere, so the skill is never a dead button when one exists.
+function nearestOpenDoorInGaze(g) {
+  const { center } = g.map;
+  let best = null;
+  let bestScore = Infinity;
+  for (const key of g.openedDoors) {
+    const x = key % g.map.size;
+    const y = Math.floor(key / g.map.size);
+    if (objAt(g, x, y) !== OBJ.DOOR) continue;
+    if (g.prisoners.some((p) => p.alive && !p.escaped && p.x === x && p.y === y)) continue;
+    const d = Math.hypot(x - center.x, y - center.y);
+    const inWedge = inWatcherGaze(g, g.watcher.facing, x, y);
+    const score = d + (inWedge ? 0 : 1000); // wedge doors always win
+    if (score < bestScore) {
+      bestScore = score;
+      best = { x, y };
+    }
+  }
+  return best;
+}
+
+// The Watcher's cooldown chips. Same signature-guarded, loop()-driven
+// refresh as the prisoner item bar, and the same visibility rule: only
+// rendered for whoever is legitimately BEING the Watcher right now, so a
+// hotseat prisoner can never read the tower's readiness off the screen.
+let _skillBarSig = "";
+function updateSkillBar() {
+  const bar = document.getElementById("skillBar");
+  if (!bar) return;
+  const g = app.game;
+  const show = g && g.turn === "Watcher" && humanControlsWatcher() && shouldShowWatcherInfo();
+  if (!show) {
+    if (_skillBarSig !== "") {
+      _skillBarSig = "";
+      bar.innerHTML = "";
+      bar.classList.add("empty");
+    }
+    return;
+  }
+  const entries = Object.values(SKILLS).map((s) => ({
+    skill: s,
+    cd: g.watcher.skills[s] || 0,
+    usable: skillUsable(g, s),
+  }));
+  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|");
+  if (sig === _skillBarSig) return;
+  _skillBarSig = sig;
+  bar.classList.remove("empty");
+  bar.innerHTML = entries
+    .map((e, i) => {
+      const info = SKILL_INFO[e.skill];
+      const cls = e.cd > 0 ? " cooling" : e.usable ? "" : " unusable";
+      const badge = e.cd > 0 ? `<span class="cd">${e.cd}</span>` : `<span class="ik">${i + 5}</span>`;
+      return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${info.label}">` +
+        `<span class="ic">${info.icon}</span>${badge}</button>`;
+    })
+    .join("");
+  bar.querySelectorAll("[data-skill]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      handleIntent("skill", btn.getAttribute("data-skill"));
+    });
+  });
+}
+
 // ---- Staged movement: nothing moves for real until the player commits ----
 // (Brain telegraph#E6: a cosmetic/preview stays presentation-only; only what
 // has real consequence touches authoritative state — here, the preview never
@@ -924,7 +1030,15 @@ function handleWatcherIntent(intent, arg) {
   if (intent === "rotate") {
     if (rotateWatcher(g, arg).ok) app.audio.play("rotate");
   } else if (intent === "bluff") {
-    if (setBluff(g, arg).ok) app.audio.play("bluff");
+    // A second bluff this turn goes through the DOUBLE_BLUFF skill instead
+    // of overwriting the first — that's exactly what the skill buys.
+    if (g.watcher.bluff != null && arg !== g.watcher.bluff && skillUsable(g, SKILLS.DOUBLE_BLUFF)) {
+      if (useSkill(g, SKILLS.DOUBLE_BLUFF, arg).ok) app.audio.play("bluff");
+    } else if (setBluff(g, arg).ok) {
+      app.audio.play("bluff");
+    }
+  } else if (intent === "skill") {
+    doUseSkill(arg);
   } else if (intent === "endTurn") {
     // Scan (commit), then end turn.
     const scan = watcherScan(g, app.config.difficulty);
@@ -1127,6 +1241,7 @@ function loop(t) {
   pollStartHold(t);
   updateDangerVignette();
   updateItemBar();
+  updateSkillBar();
   // Safety net: a staged path (and an armed break) only make sense during
   // the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") {
