@@ -50,7 +50,7 @@ function check(cond, label) {
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
-  await page.keyboard.press("Enter"); // dismiss intro -> menu
+  await page.keyboard.down("Space"); await page.waitForTimeout(750); await page.keyboard.up("Space"); // hold to dismiss intro -> menu
   await page.waitForTimeout(500);
 
   // Default volume is Full (1) until the player touches the menu.
@@ -67,6 +67,11 @@ function check(cond, label) {
 
   // Start a game, then use the HUD mute toggle.
   await page.click("#playPrisoner");
+  await page.waitForTimeout(200);
+  await page.hover("#btnStart");
+  await page.mouse.down();
+  await page.waitForTimeout(750);
+  await page.mouse.up();
   await page.waitForTimeout(300);
   await page.click("#btnSound");
   await page.waitForTimeout(100);

@@ -46,6 +46,12 @@ export function createGame(map, opts = {}) {
       // Unused for a human-controlled prisoner. See prisonerAI.js.
       stalledTurns: 0,
       bestDistToExit: Infinity,
+      // Cosmetic-only hook, unread by any current logic or renderer: reserves
+      // the shape now so a future outfit/customization system (see
+      // docs/cognitive-updates) doesn't need a data migration later. Must
+      // stay purely visual — never gameplay-affecting (see Tension T25 /
+      // the ideas repo's cosmetics-only monetization note).
+      appearance: "default",
     })
   );
 

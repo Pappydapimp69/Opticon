@@ -19,11 +19,16 @@ const server = http.createServer((req, res) => {
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
-  await page.keyboard.press("Enter"); await page.waitForTimeout(700);
+  await page.keyboard.down("Space"); await page.waitForTimeout(750); await page.keyboard.up("Space");
+  await page.waitForTimeout(300);
   await page.click('[data-diff="medium"]');
   await page.waitForTimeout(200);
   await page.click("#playPrisoner");
   await page.waitForTimeout(200);
+  await page.hover("#btnStart");
+  await page.mouse.down();
+  await page.waitForTimeout(750);
+  await page.mouse.up();
   await page.waitForTimeout(500);
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.

@@ -12,18 +12,13 @@ export class Input {
     this.mode = "game";
     this.keys = new Set();
     this.padPrev = [];
+    this.padPressed = []; // current-frame gamepad button state, for hold checks
     this._stickHeld = false;
     this.activeScheme = "keyboard";
     this.menuHandlers = null; // { navX(dir), navY(dir), select(), back() }
-    this.introHandler = null; // () => void
     this.passHandler = null; // () => void — hotseat "pass the device" gate
     this._bindKeyboard();
-    // The very first gamepad press (which unlocks the API) should also dismiss
-    // the intro, so a controller-only player never gets stuck on the splash.
-    window.addEventListener("gamepadconnected", () => {
-      this._setScheme("gamepad");
-      if (this.mode === "intro" && this.introHandler) this.introHandler();
-    });
+    window.addEventListener("gamepadconnected", () => this._setScheme("gamepad"));
   }
 
   setScheme(s) { this._setScheme(s); }
@@ -34,11 +29,11 @@ export class Input {
   }
 
   setMenuHandlers(navX, navY, select, back) { this.menuHandlers = { navX, navY, select, back }; }
-  setIntroHandler(fn) { this.introHandler = fn; }
   setPassHandler(fn) { this.passHandler = fn; }
   // Raw held-state (not edge-triggered) — for press-and-hold confirms, where
   // an intent callback per keydown isn't enough.
   isHeld(code) { return this.keys.has(code); }
+  isPadHeld(i) { return !!(this.padPressed && this.padPressed[i]); }
 
   _bindKeyboard() {
     window.addEventListener("keydown", (e) => {
@@ -51,9 +46,10 @@ export class Input {
   }
 
   _handleKey(e) {
-    // Intro: any key begins.
+    // Intro: requires a HOLD (Space), read directly via isHeld() and polled
+    // in main.js's loop() — a single keydown must not dismiss it, so this
+    // just swallows the event without dispatching anything.
     if (this.mode === "intro") {
-      if (this.introHandler) this.introHandler();
       e.preventDefault();
       return;
     }
@@ -146,6 +142,7 @@ export class Input {
     const pad = pads && pads[0];
     if (!pad) return;
     const pressed = pad.buttons.map((b) => b.pressed);
+    this.padPressed = pressed; // for isPadHeld(), regardless of mode below
     const prev = this.padPrev;
     const edge = (i) => pressed[i] && !prev[i];
     const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
@@ -163,7 +160,8 @@ export class Input {
     }
 
     if (this.mode === "intro") {
-      if (anyEdge) this.introHandler && this.introHandler();
+      // Requires a HOLD (X, index 2) — read via isPadHeld() and polled in
+      // main.js's loop(), not dispatched from here on an edge.
       this.padPrev = pressed;
       return;
     }

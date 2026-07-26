@@ -58,19 +58,27 @@ const scenario = process.argv[2] || "prisoner";
 
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
-  // Dismiss the intro splash (unlocks audio, reveals the menu).
-  await page.keyboard.press("Enter");
-  await page.waitForTimeout(700);
+  // Dismiss the intro splash (unlocks audio, reveals the menu). Requires a
+  // HOLD (>=650ms), not a tap — a single press must NOT dismiss it.
+  await page.keyboard.down("Space");
+  await page.waitForTimeout(750);
+  await page.keyboard.up("Space");
+  await page.waitForTimeout(300);
 
   // Ensure build label loaded (module ran).
   const build = await page.$eval("#buildLabel", (el) => el.textContent).catch(() => null);
 
-  // Start a game via the staged menu: difficulty -> play type -> hold to start.
+  // Start a game: difficulty -> play type (selects only, moves focus to
+  // Start) -> hold the Start button.
   const startBtn = scenario === "watcher" ? "#playWatcher" : scenario === "hotseat" ? "#playHotseat" : "#playPrisoner";
   await page.click('[data-diff="medium"]');
   await page.waitForTimeout(200);
   await page.click(startBtn);
   await page.waitForTimeout(200);
+  await page.hover("#btnStart");
+  await page.mouse.down();
+  await page.waitForTimeout(750);
+  await page.mouse.up();
   await page.waitForTimeout(400);
 
   // Capture an early gameplay screenshot (before heavy play) for visual review.
