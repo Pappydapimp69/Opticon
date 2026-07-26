@@ -19,6 +19,7 @@ export class Audio {
     this.master = null;
     this.sfxGain = null;
     this.music = null;
+    this._pulseTimer = null; // exposure/danger heartbeat interval
   }
 
   ensure() {
@@ -131,6 +132,36 @@ export class Audio {
         this.tone(392, 0.6, "sine", 0.05, 0.12);
         break;
     }
+  }
+
+  // Exposure/danger cue: a low two-thump heartbeat, re-triggered on an
+  // interval while the Prisoner is exposed (see main.js updateDangerVignette
+  // — same isExposed() check the Watcher's scan actually uses, so this is
+  // never a fake alarm). Idempotent start/stop, mirroring startMusic/
+  // stopMusic's own pattern.
+  startHeartbeat() {
+    if (this._pulseTimer) return;
+    this.ensure();
+    const beat = () => {
+      if (!this.ctx) return;
+      this.tone(72, 0.14, "sine", 0.1);
+      const t = this.ctx.currentTime + 0.16;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(58, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.08, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      osc.connect(g).connect(this.sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.2);
+    };
+    beat();
+    this._pulseTimer = setInterval(beat, 1100);
+  }
+  stopHeartbeat() {
+    if (this._pulseTimer) { clearInterval(this._pulseTimer); this._pulseTimer = null; }
   }
 
   // Back-compat aliases (main.js used drone naming).

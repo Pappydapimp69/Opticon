@@ -14,6 +14,7 @@ import {
   objAt,
   isWalkable,
   isDoorOpen,
+  isExposed,
 } from "./rules.js";
 import { playWatcherTurn } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
@@ -22,7 +23,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.12.0";
+const BUILD = "beta-0.13.0";
 
 const app = {
   renderer: null,
@@ -186,7 +187,7 @@ function dismissPassDevice() {
   app.running = true;
   app.input.mode = "game";
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-  app.ui.renderLog(g);
+  app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
 }
@@ -357,7 +358,7 @@ function startGame(overrides = {}) {
   app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
   app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-  app.ui.renderLog(app.game);
+  app.ui.renderLog(app.game, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
 
@@ -433,7 +434,7 @@ function handleIntent(intent, arg) {
     handleWatcherIntent(intent, arg);
   }
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-  app.ui.renderLog(g);
+  app.ui.renderLog(g, shouldShowWatcherInfo());
 }
 
 function humanControlsPrisoner() {
@@ -497,7 +498,7 @@ function stagePathExtend(dir) {
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
         app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-        app.ui.renderLog(g);
+        app.ui.renderLog(g, shouldShowWatcherInfo());
       }
     } else {
       app.audio.play("blocked"); // can't preview past an unresolved door/switch
@@ -537,7 +538,7 @@ function commitStagedPath() {
   app.stagedPath = [];
   app.renderer.walkTo(fromTile, walkSteps);
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-  app.ui.renderLog(g);
+  app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
 }
@@ -625,7 +626,7 @@ function scheduleAiWatcher() {
     app.aiThinking = false;
     checkOver();
     app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-    app.ui.renderLog(g);
+    app.ui.renderLog(g, shouldShowWatcherInfo());
     if (!isOver(g)) app.ui.banner("Your move", "prisoner");
     app.ui.hint(hintFor());
   updateCommitButton();
@@ -644,7 +645,7 @@ function scheduleAiPrisoner() {
     app.aiThinking = false;
     checkOver();
     app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
-    app.ui.renderLog(g);
+    app.ui.renderLog(g, shouldShowWatcherInfo());
     if (!isOver(g)) app.ui.banner("Watcher's turn — your move", "watcher");
     app.ui.hint(hintFor());
   updateCommitButton();
@@ -713,10 +714,36 @@ function checkOver() {
 
 // ---- Main loop -----------------------------------------------------------
 
+// Exposure vignette: a diegetic "you can be seen" cue, computed from the
+// SAME rule watcherScan actually captures with (isExposed), so it's never a
+// fake indicator — if it's showing, a scan this instant really would catch
+// you. Gated by shouldShowPrisoner() so it can never leak to the Watcher's
+// own screen in hotseat (that would just be handing them a free "yes,
+// they're exposed right now" the noise/light cues are supposed to make them
+// infer themselves).
+let dangerActive = false;
+function updateDangerVignette() {
+  const g = app.game;
+  const vignette = document.getElementById("dangerVignette");
+  if (!vignette) return;
+  let danger = false;
+  if (app.running && g && !isOver(g) && shouldShowPrisoner()) {
+    const p = g.prisoners[g.activePrisoner];
+    if (p && p.alive && !p.escaped) {
+      danger = isExposed(g, p.x, p.y, app.config.difficulty);
+    }
+  }
+  vignette.classList.toggle("danger", danger);
+  if (danger && !dangerActive) app.audio.startHeartbeat();
+  else if (!danger && dangerActive) app.audio.stopHeartbeat();
+  dangerActive = danger;
+}
+
 function loop(t) {
   const dt = Math.min(0.05, (t - app.lastT) / 1000 || 0);
   app.lastT = t;
   if (app.input) app.input.pollGamepad();
+  updateDangerVignette();
   // Safety net: a staged path only makes sense during the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") resetStagedPath();
   if (app.renderer && app.game) {
