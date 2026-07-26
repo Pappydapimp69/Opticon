@@ -22,7 +22,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.10.0";
+const BUILD = "beta-0.11.0";
 
 const app = {
   renderer: null,
@@ -532,7 +532,11 @@ function handleWatcherIntent(intent, arg) {
     // Scan (commit), then end turn.
     const scan = watcherScan(g, app.config.difficulty);
     app.audio.play("scan");
-    if (scan.caught) { app.audio.play("caught"); app.ui.banner("CAPTURED!", "bad"); }
+    if (scan.caught) {
+      app.audio.play("caught");
+      app.ui.banner("CAPTURED!", "bad");
+      app.renderer.triggerCaptureFlash(scan.caught.x, scan.caught.y);
+    }
     checkOver();
     if (isOver(g)) return;
     endWatcherTurn(g);
@@ -564,7 +568,12 @@ function scheduleAiWatcher() {
       if (a.type === "bluff") app.audio.play("bluff");
       if (a.type === "scan") {
         app.audio.play("scan");
-        if (a.caught != null) { app.audio.play("caught"); app.ui.banner("CAPTURED!", "bad"); }
+        if (a.caught != null) {
+          app.audio.play("caught");
+          app.ui.banner("CAPTURED!", "bad");
+          const caughtP = g.prisoners[a.caught];
+          if (caughtP) app.renderer.triggerCaptureFlash(caughtP.x, caughtP.y);
+        }
       }
     }
     app.aiThinking = false;
