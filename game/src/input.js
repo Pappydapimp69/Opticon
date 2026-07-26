@@ -16,6 +16,7 @@ export class Input {
     this.activeScheme = "keyboard";
     this.menuHandlers = null; // { navX(dir), navY(dir), select(), back() }
     this.introHandler = null; // () => void
+    this.passHandler = null; // () => void — hotseat "pass the device" gate
     this._bindKeyboard();
     // The very first gamepad press (which unlocks the API) should also dismiss
     // the intro, so a controller-only player never gets stuck on the splash.
@@ -34,6 +35,7 @@ export class Input {
 
   setMenuHandlers(navX, navY, select, back) { this.menuHandlers = { navX, navY, select, back }; }
   setIntroHandler(fn) { this.introHandler = fn; }
+  setPassHandler(fn) { this.passHandler = fn; }
   // Raw held-state (not edge-triggered) — for press-and-hold confirms, where
   // an intent callback per keydown isn't enough.
   isHeld(code) { return this.keys.has(code); }
@@ -52,6 +54,12 @@ export class Input {
     // Intro: any key begins.
     if (this.mode === "intro") {
       if (this.introHandler) this.introHandler();
+      e.preventDefault();
+      return;
+    }
+    // Hotseat pass-the-device gate: any key reveals the next player's turn.
+    if (this.mode === "pass") {
+      if (this.passHandler) this.passHandler();
       e.preventDefault();
       return;
     }
@@ -156,6 +164,12 @@ export class Input {
 
     if (this.mode === "intro") {
       if (anyEdge) this.introHandler && this.introHandler();
+      this.padPrev = pressed;
+      return;
+    }
+
+    if (this.mode === "pass") {
+      if (anyEdge) this.passHandler && this.passHandler();
       this.padPrev = pressed;
       return;
     }

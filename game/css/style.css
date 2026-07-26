@@ -166,6 +166,13 @@ html, body {
 .overlay-actions { display: flex; gap: 12px; justify-content: center; }
 .overlay-actions .play-btn { align-items: center; min-width: 130px; }
 
+/* ---- Pass-the-device (hotseat) ---- */
+#passDeviceTitle { font-size: 30px; letter-spacing: 4px; margin: 6px 0 14px; text-align: center; }
+#passDeviceTitle.watcher { color: var(--watcher); text-shadow: 0 0 40px rgba(255,107,122,0.3); }
+#passDeviceTitle.prisoner { color: var(--prisoner); text-shadow: 0 0 40px rgba(90,212,230,0.3); }
+.pass-sub { color: var(--muted); margin: 0 0 8px; text-align: center; }
+.pass-prompt { color: var(--muted); margin: 0; text-align: center; font-size: 13px; opacity: 0.8; }
+
 @media (max-width: 640px) {
   .logo { font-size: 34px; letter-spacing: 6px; }
   .play-grid { grid-template-columns: 1fr; }
