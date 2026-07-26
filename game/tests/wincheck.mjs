@@ -30,6 +30,7 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(500);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
   const dir = await page.evaluate(() => {

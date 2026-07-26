@@ -674,8 +674,10 @@ export class Renderer {
     // unlit tiles by design — it traces, it doesn't reveal or emit light).
     this.updatePathPreview(p, opts.stagedPath || []);
 
-    // Camera behaviour.
-    this.updateCamera(game, p, dt, opts);
+    // Camera behaviour — the intro cutscene (if playing) owns the camera
+    // outright; normal viewMode-driven follow resumes once it resolves.
+    if (this.cutscene) this._advanceCutscene(dt);
+    else this.updateCamera(game, p, dt);
 
     this.renderer.render(this.scene, this.camera);
     return { arrived };
@@ -772,14 +774,19 @@ export class Renderer {
     if (this.floorMesh.instanceColor) this.floorMesh.instanceColor.needsUpdate = true;
   }
 
-  updateCamera(game, prisoner, dt, opts) {
+  // The steady-state camera pos/target for the current viewMode. Pulled out
+  // of updateCamera so the intro cutscene's FINAL waypoint can call this
+  // exact same formula — skip and full-playback then provably converge on
+  // the identical camera state, by construction, not by keeping two
+  // hand-tuned camera rigs in sync.
+  computeCameraTarget(game, prisoner) {
     const cx = this.worldX(prisoner.x);
     const cz = this.worldZ(prisoner.y);
     const towerX = this.worldX(this.center.x);
     const towerZ = this.worldZ(this.center.y);
 
-    let tPos = new THREE.Vector3();
-    let tTarget = new THREE.Vector3();
+    const tPos = new THREE.Vector3();
+    const tTarget = new THREE.Vector3();
 
     if (this.viewMode === "watcher") {
       // High over the tower looking outward toward the facing direction.
@@ -803,10 +810,127 @@ export class Renderer {
         cz + Math.cos(a) * d * Math.cos(el)
       );
     }
+    return { pos: tPos, target: tTarget };
+  }
 
+  updateCamera(game, prisoner, dt) {
+    const { pos: tPos, target: tTarget } = this.computeCameraTarget(game, prisoner);
     const k = smoothing(dt, 0.25);
     this.camPos.lerp(tPos, k);
     this.camTarget.lerp(tTarget, k);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camTarget);
+  }
+
+  // ---- Intro cutscene ------------------------------------------------
+  // A scripted "lay of the land" flythrough played once at game start: wide
+  // establishing sweep over the map, the gate, then (Prisoner-side only —
+  // see the `showPrisoners` gate below) a close-up on each prisoner's spawn.
+  // Driven as ONE continuous exponentially-smoothed chase across a waypoint
+  // list rather than discrete hold/move/hold segments (Brain
+  // one-continuous-eased-curve-beats-punch-hold-release: a literal flat
+  // hold between eased moves reads as mechanical even with smooth edges) —
+  // the camera is always still chasing *some* target, and the target simply
+  // advances over time, so there's never a dead stop.
+  buildIntroWaypoints(game, endCam, showPrisoners) {
+    const towerX = this.worldX(this.center.x);
+    const towerZ = this.worldZ(this.center.y);
+    const r = this.playRadius || 20;
+    const waypoints = [];
+    waypoints.push({
+      pos: new THREE.Vector3(towerX + r * 1.6, r * 1.6 + 4, towerZ + r * 1.8),
+      target: new THREE.Vector3(towerX, 0, towerZ),
+      dur: 1.7,
+    });
+    waypoints.push({
+      pos: new THREE.Vector3(towerX - r * 1.2, r * 1.0 + 3, towerZ + r * 0.35),
+      target: new THREE.Vector3(towerX, 0, towerZ),
+      dur: 1.5,
+    });
+    const exitProp = this.props && this.props.exit;
+    if (exitProp) {
+      const ep = exitProp.mesh.position;
+      waypoints.push({
+        pos: new THREE.Vector3(ep.x + 3, 3, ep.z + 3),
+        target: new THREE.Vector3(ep.x, 0.6, ep.z),
+        dur: 1.2,
+      });
+    }
+    // Per-prisoner close-ups — ONLY when the viewer is legitimately allowed
+    // to know where prisoners start (never a Watcher-role human: seeing
+    // every spawn up front would hand them perfect intel the fog-of-war
+    // design exists specifically to deny — the same class of leak as the
+    // HUD/log gating elsewhere in this file).
+    if (showPrisoners) {
+      for (const pr of game.prisoners) {
+        const wx = this.worldX(pr.x);
+        const wz = this.worldZ(pr.y);
+        waypoints.push({
+          pos: new THREE.Vector3(wx + 1.6, 1.4, wz + 1.7),
+          target: new THREE.Vector3(wx, 0.6, wz),
+          dur: 1.1,
+        });
+      }
+    }
+    // Settle into the REAL starting gameplay camera — identical formula the
+    // skip path snaps to directly.
+    waypoints.push({ pos: endCam.pos.clone(), target: endCam.target.clone(), dur: 1.0 });
+    return waypoints;
+  }
+
+  // Returns a Promise that resolves when the cutscene finishes (naturally or
+  // via skipIntro()). `opts.viewedPrisoner` picks whose eyes the sequence
+  // settles into; `opts.showPrisoners` gates the per-spawn close-ups.
+  playIntro(game, opts = {}) {
+    const viewed = game.prisoners[opts.viewedPrisoner || 0] || game.prisoners[0];
+    const endCam = this.computeCameraTarget(game, viewed);
+    const waypoints = this.buildIntroWaypoints(game, endCam, !!opts.showPrisoners);
+    const totalDur = waypoints.reduce((s, w) => s + w.dur, 0);
+    return new Promise((resolve) => {
+      this.cutscene = { waypoints, totalDur, elapsed: 0, endCam, resolve };
+    });
+  }
+
+  // Skip and full playback both terminate by copying the SAME endCam values
+  // computed once in playIntro() — provable watch/skip parity by
+  // construction, not by two independently-tuned end states.
+  skipIntro() {
+    if (!this.cutscene) return;
+    this._finishCutscene();
+  }
+
+  _finishCutscene() {
+    const cs = this.cutscene;
+    if (!cs) return;
+    this.camPos.copy(cs.endCam.pos);
+    this.camTarget.copy(cs.endCam.target);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camTarget);
+    this.cutscene = null;
+    cs.resolve();
+  }
+
+  _advanceCutscene(dt) {
+    const cs = this.cutscene;
+    cs.elapsed += dt;
+    if (cs.elapsed >= cs.totalDur) {
+      this._finishCutscene();
+      return;
+    }
+    let segStart = 0;
+    let seg = cs.waypoints[cs.waypoints.length - 1];
+    for (const w of cs.waypoints) {
+      if (cs.elapsed <= segStart + w.dur) { seg = w; break; }
+      segStart += w.dur;
+    }
+    // Cheap, map-relative safety floor (not a path-specific hard clamp —
+    // every waypoint above is already derived from real map/spawn/gate
+    // positions, so this only ever needs to catch a camera dipping below
+    // the floor plane, not steer around scripted geometry).
+    const k = smoothing(dt, 0.3);
+    this.camPos.lerp(seg.pos, k);
+    this.camPos.y = Math.max(this.camPos.y, 1.2);
+    this.camTarget.lerp(seg.target, k);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camTarget);
   }

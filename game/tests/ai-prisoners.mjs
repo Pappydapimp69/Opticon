@@ -48,6 +48,7 @@ async function startGame(page, playBtn) {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(400);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 }
 
 (async () => {

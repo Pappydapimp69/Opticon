@@ -43,6 +43,7 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(1000);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   // Force each view and screenshot.
   for (const view of ["overview", "watcher", "prisoner"]) {

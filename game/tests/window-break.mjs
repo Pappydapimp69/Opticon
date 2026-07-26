@@ -60,6 +60,7 @@ function check(cond, label) {
   await page.waitForTimeout(750);
   await page.mouse.up();
   await page.waitForTimeout(300);
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   // Find two windows on the generated map, each with an adjacent floor tile.
   // startGame() picks a fresh random seed every time, so a single attempt
@@ -99,6 +100,10 @@ function check(cond, label) {
     await page.waitForTimeout(250);
     setup = await findWindows();
   }
+  // Each Restart click re-enters startGame() → a fresh cutscene, re-arming
+  // cutsceneActive — skip it once more so the break-window intents below
+  // land as real actions, not as the cutscene's skip-on-any-control catch.
+  await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
   check(setup.count >= 1, `map has at least one usable window (found ${setup.count} after retries)`);
   if (setup.count < 1) {
