@@ -529,7 +529,13 @@ export class Renderer {
   update(game, dt, opts = {}) {
     this.time += dt;
     const map = game.map;
-    const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
+    // Camera/FoV/path-preview below are about the HUMAN's own vantage point,
+    // not whoever's turn is currently resolving — `game.activePrisoner`
+    // cycles through AI companions automatically, and following it here
+    // would yank the camera onto a teammate mid-turn. The caller (main.js)
+    // knows which prisoner is the human's and passes it explicitly.
+    const viewedIdx = opts.viewedPrisoner != null ? opts.viewedPrisoner : 0;
+    const p = game.prisoners[viewedIdx] || game.prisoners[0];
 
     // Avatar position, per prisoner: walk a queued path tile-by-tile if one
     // is active for THAT prisoner (a just-committed move — Brain

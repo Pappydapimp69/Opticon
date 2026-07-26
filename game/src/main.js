@@ -24,7 +24,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.16.0";
+const BUILD = "beta-0.17.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -575,6 +575,17 @@ function humanControlsWatcher() {
   return app.config.mode === "hotseat" || app.config.humanRole === "Watcher";
 }
 
+// The prisoner index whose eyes the human is watching through — always 0
+// (hotseat is exactly 1 prisoner; companions are always spawned at index
+// 1+). Distinct from `game.activePrisoner` (whoever's turn it is RIGHT NOW,
+// which cycles through companions automatically). Camera, FoV, the exposure
+// vignette, and self-noise cues must all track this, not the acting index —
+// otherwise a companion's automated turn yanks the human's camera/vignette
+// onto a teammate instead of reflecting the human's own risk.
+function humanPrisonerIndex() {
+  return 0;
+}
+
 // Touch has no Shift/RB modifier to hold, so a toggle arms the NEXT dpad tap
 // as a break instead of a move — cleared the moment it's used (or the turn
 // changes), so it can never linger and silently reinterpret a later tap.
@@ -935,7 +946,7 @@ function updateDangerVignette() {
   if (!vignette) return;
   let danger = false;
   if (app.running && g && !isOver(g) && shouldShowPrisoner()) {
-    const p = g.prisoners[g.activePrisoner];
+    const p = g.prisoners[humanPrisonerIndex()];
     if (p && p.alive && !p.escaped) {
       danger = isExposed(g, p.x, p.y, app.config.difficulty);
     }
@@ -960,12 +971,13 @@ function loop(t) {
     if (breakArmed) { breakArmed = false; updateBreakToggleUI(); }
   }
   if (app.renderer && app.game) {
-    const activePrisoner = app.game.prisoners[app.game.activePrisoner];
+    const viewedPrisoner = app.game.prisoners[humanPrisonerIndex()];
     const result = app.renderer.update(app.game, dt, {
       showPrisoner: shouldShowPrisoner(),
       showWatcherInfo: shouldShowWatcherInfo(),
       stagedPath: app.stagedPath,
-      selfNoise: (activePrisoner && activePrisoner.selfNoise) || [],
+      viewedPrisoner: humanPrisonerIndex(),
+      selfNoise: (viewedPrisoner && viewedPrisoner.selfNoise) || [],
     });
     // The avatar just visually arrived at one or more committed tiles — fire
     // that tile's audio/ping now (matching the footstep, not the sim resolve).
