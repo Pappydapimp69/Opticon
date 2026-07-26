@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.28.0";
+const BUILD = "beta-0.29.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -784,9 +784,11 @@ function doUseItem(kind, dirOrNull) {
       app.audio.play("noise");
       app.renderer.triggerPing(r.x, r.y);
     } else if (r.event === "cutters") {
-      app.audio.play("switch");
+      app.audio.play("cutters");
+    } else if (r.event === "muffle") {
+      app.audio.play("muffle");
     } else {
-      app.audio.play("ui");
+      app.audio.play("item");
     }
   } else {
     app.audio.play("blocked");
@@ -858,12 +860,12 @@ function doUseSkill(skill) {
   const r = useSkill(g, skill, arg);
   if (r.ok) {
     if (r.event === "lock") {
-      app.audio.play("blocked");
+      app.audio.play("lock");
       app.renderer.triggerPing(r.x, r.y);
     } else if (r.event === "wide-scan") {
       app.audio.play("scan");
     } else {
-      app.audio.play("ui");
+      app.audio.play("skill");
     }
   } else {
     app.audio.play("blocked");
@@ -1335,6 +1337,7 @@ function loop(t) {
     if (result && result.arrived && result.arrived.length) {
       for (const step of result.arrived) {
         if (step.event === "glass") { app.audio.play("glass"); app.renderer.triggerPing(step.x, step.y); }
+        else if (step.event === "item-pickup") app.audio.play("pickup");
         else if (step.event === "exit") { app.audio.play("escape"); app.ui.banner("ESCAPED!", "good"); }
         else app.audio.play("move");
       }

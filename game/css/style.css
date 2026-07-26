@@ -300,3 +300,11 @@ html, body {
 @media (max-width: 720px) { .skill-bar { bottom: 210px; } }
 .item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }
 .stat .val.urgent { color: #ff6b6b; animation: dangerPulse 1s ease-in-out infinite; }
+
+/* ---- Crew roster (who is still in play) --------------------------------- */
+.val.roster { display: inline-flex; gap: 5px; letter-spacing: 0; }
+.roster .pip { font-size: 15px; line-height: 1; transition: opacity .2s; }
+.roster .pip.run { color: var(--prisoner); }
+.roster .pip.down { color: #ff5f6d; opacity: .75; }
+.roster .pip.out { color: #59f7a6; }
+.roster .pip.act { text-shadow: 0 0 8px currentColor; transform: scale(1.18); }
