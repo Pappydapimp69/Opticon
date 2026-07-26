@@ -4,7 +4,19 @@
 // only way to be captured. Shared by the in-game AI and the balance simulator.
 
 import { DIR_VEC } from "./map.js";
-import { moveActivePrisoner, isLit, inWatcherGaze, isOver } from "./rules.js";
+import {
+  moveActivePrisoner,
+  isLit,
+  inWatcherGaze,
+  isOver,
+  useItem,
+  isItemTaken,
+  distractTarget,
+  objAt,
+  isDoorOpen,
+  ITEM_CAP,
+} from "./rules.js";
+import { ITEM_KINDS, OBJ } from "./map.js";
 import { bfsPath, stepToward } from "./pathfind.js";
 
 // Is a tile a place the Watcher could capture you on (lit AND in true/bluff gaze)?
@@ -33,6 +45,76 @@ function dirBetween(ax, ay, bx, by) {
 // cautious AI could in principle stall a human Watcher's game forever).
 const STALL_LIMIT = 3;
 
+// How far off-route the AI will detour to grab a pickup. MEASURED, not
+// guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
+// -> 38/32/10% easy/medium/hard over 150 games/tier), and setting it to 0
+// restored the baseline exactly — so the detour itself, not the items, was
+// the whole cost. In this game tempo is the scarce resource, not safety:
+// rounds spent wandering hand the Watcher more scans. At 1 (grab only what
+// is literally adjacent) the rate is 40/35/13% — indistinguishable from
+// baseline — while the AI still ends up carrying and spending items.
+const ITEM_DETOUR = 1;
+
+// Nearest uncollected item within ITEM_DETOUR, or null. Skipped entirely
+// once the belt is full or the AI has committed to a straight run.
+function nearbyItem(game, p) {
+  if (p.items.length >= ITEM_CAP) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const it of game.map.items || []) {
+    if (isItemTaken(game, it.x, it.y)) continue;
+    const d = Math.abs(it.x - p.x) + Math.abs(it.y - p.y);
+    if (d > 0 && d <= ITEM_DETOUR && d < bestD) {
+      bestD = d;
+      best = it;
+    }
+  }
+  return best;
+}
+
+// Spend carried items when they'd actually help THIS turn. Each check
+// mirrors the item's own precondition, so a use is never attempted that
+// rules.js would just refuse.
+function useItemsOpportunistically(game, p, committed, rng) {
+  // CUTTERS: standing next to a live switch, kill the circuit for good —
+  // permanently removing light is worth more than any single turn's move.
+  if (p.items.includes(ITEM_KINDS.CUTTERS)) {
+    for (let d = 0; d < 4; d++) {
+      const { dx, dy } = DIR_VEC[d];
+      const nx = p.x + dx;
+      const ny = p.y + dy;
+      if (objAt(game, nx, ny) !== OBJ.SWITCH) continue;
+      const grp = game.map.lightGroup[ny][nx];
+      if (!game.lightState[grp] || game.deadLightGroups.has(grp)) continue;
+      if (useItem(game, ITEM_KINDS.CUTTERS, d).ok) break;
+    }
+  }
+
+  // MUFFLE: only worth it when we actually intend to cover ground this
+  // turn (2+ tiles is what triggers the noise reveal in the first place)
+  // and we're still far enough out that being heard matters.
+  if (p.items.includes(ITEM_KINDS.MUFFLE) && !p.muffled && p.mp >= 2) {
+    const exit = game.map.exit;
+    const far = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y) > 3;
+    if (far || committed) useItem(game, ITEM_KINDS.MUFFLE, null);
+  }
+
+  // DISTRACT: only when currently standing somewhere the Watcher could
+  // catch us — throw the decoy AWAY from the exit so it pulls attention
+  // off our actual route rather than onto it.
+  if (p.items.includes(ITEM_KINDS.DISTRACT) && p.mp >= 2 && dangerous(game, p.x, p.y)) {
+    const exit = game.map.exit;
+    const toExit = Math.abs(exit.x - p.x) > Math.abs(exit.y - p.y)
+      ? (exit.x > p.x ? 1 : 3)
+      : (exit.y > p.y ? 2 : 0);
+    const away = (toExit + 2) % 4;
+    for (const d of [away, (away + 1) % 4, (away + 3) % 4]) {
+      if (!distractTarget(game, p, d)) continue;
+      if (useItem(game, ITEM_KINDS.DISTRACT, d).ok) break;
+    }
+  }
+}
+
 // Play one full prisoner turn (does NOT end the turn; caller does that).
 // rng: optional () => [0,1) for tie-breaking variety.
 export function prisonerAITurn(game, rng = Math.random) {
@@ -47,10 +129,17 @@ export function prisonerAITurn(game, rng = Math.random) {
   // stalemate can never persist indefinitely.
   const committed = p.stalledTurns >= STALL_LIMIT;
 
+  useItemsOpportunistically(game, p, committed, rng);
+
+  // A short detour to a pickup, but never while committed — the whole point
+  // of the commit state is that it stops making side trips.
+  const detour = committed ? null : nearbyItem(game, p);
+
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
     const avoid = committed ? null : buildAvoidSet(game);
-    const path = bfsPath(game.map, p.x, p.y, exit.x, exit.y, avoid);
+    const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
+    const path = bfsPath(game.map, p.x, p.y, goal.x, goal.y, avoid);
     if (!path || path.length < 2) break;
 
     const next = path[1];
@@ -64,6 +153,17 @@ export function prisonerAITurn(game, rng = Math.random) {
       const endsDangerous = dangerous(game, next.x, next.y);
       const nearExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y) <= 2;
       if (endsDangerous && stepsThisTurn >= 1 && !nearExit) break;
+    }
+
+    // A closed door on the route: a carried lockpick opens it for free,
+    // where walking into it would burn a move point.
+    if (
+      p.items.includes(ITEM_KINDS.LOCKPICK) &&
+      objAt(game, next.x, next.y) === OBJ.DOOR &&
+      !isDoorOpen(game, next.x, next.y) &&
+      useItem(game, ITEM_KINDS.LOCKPICK, dir).ok
+    ) {
+      continue; // door now open, re-plan and step through with full MP
     }
 
     const r = moveActivePrisoner(game, dir);

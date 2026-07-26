@@ -27,6 +27,7 @@ import {
   SKILLS,
   SKILL_INFO,
   NOISE_TTL,
+  isOver,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
@@ -846,6 +847,43 @@ section("skills refuse outside the watcher's turn");
     ok(!r.ok && r.reason === "not-your-turn", `${s} refuses on the prisoner's turn`);
   }
 }
+
+// --- Prisoner AI + items --------------------------------------------------
+
+section("AI prisoners actually collect and spend items");
+{
+  let sawCarry = false;
+  for (let seed = 1; seed <= 30 && !sawCarry; seed++) {
+    const m = generateMap(seed, { ...MAP_DEFAULTS, prisonerCount: 3 });
+    const g = createGame(m, { prisoners: m.spawns });
+    let guard = 60;
+    while (!isOver(g) && guard-- > 0) {
+      prisonerAITurn(g);
+      if (g.prisoners.some((p) => p.items.length > 0)) sawCarry = true;
+      endPrisonerTurn(g);
+      if (isOver(g)) break;
+      playWatcherTurn(g, "medium", seed);
+    }
+  }
+  ok(sawCarry, "an AI prisoner picked up an item during normal play");
+}
+
+// The detour must not defeat the anti-stall guarantee (T24): every game
+// still has to terminate well inside the guard budget.
+section("item detours never reintroduce a stall");
+for (let seed = 1; seed <= 12; seed++) {
+  const m = generateMap(seed, { ...MAP_DEFAULTS, prisonerCount: 3 });
+  const g = createGame(m, { prisoners: m.spawns });
+  let guard = 120;
+  while (!isOver(g) && guard-- > 0) {
+    prisonerAITurn(g);
+    endPrisonerTurn(g);
+    if (isOver(g)) break;
+    playWatcherTurn(g, "medium", seed);
+  }
+  ok(isOver(g), `seed ${seed}: game still terminates with item detours enabled`);
+}
+
 
 // --- Summary --------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
