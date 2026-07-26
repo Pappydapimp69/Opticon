@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.23.0";
+const BUILD = "beta-0.24.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -640,6 +640,11 @@ let breakArmed = false;
 // breakArmed is armed — the two are mutually exclusive modes.
 let armedItem = null;
 
+// Which slot the gamepad's LT/RT pair currently points at. Shared by the
+// item belt and the skill row — whose list it indexes is decided by turn,
+// so one cursor serves both without a second binding.
+let padSlot = 0;
+
 // Which prisoner's avatar is (or was last) mid walk-animation — each
 // prisoner now has its own independent walk queue in the renderer, so
 // checking "is the walk finished" needs to know WHICH one, not just
@@ -661,6 +666,16 @@ function handlePrisonerIntent(intent, arg) {
   }
   if (intent === "item") {
     armItemSlot(arg);
+    return;
+  }
+  // Gamepad slot cursor: on the Prisoner's turn it indexes the item belt.
+  if (intent === "slotCursor") {
+    padSlot = arg;
+    _itemBarSig = ""; // force a repaint so the highlight moves
+    return;
+  }
+  if (intent === "useSlot") {
+    armItemSlot(padSlot);
     return;
   }
   if (intent === "break") {
@@ -784,7 +799,7 @@ function updateItemBar() {
   const g = app.game;
   const show = g && g.turn === "Prisoner" && humanControlsPrisoner();
   const p = show ? g.prisoners[g.activePrisoner] : null;
-  const sig = p ? `${p.items.join(",")}|${armedItem || ""}` : "";
+  const sig = p ? `${p.items.join(",")}|${armedItem || ""}|${padSlot}` : "";
   if (sig === _itemBarSig) return;
   _itemBarSig = sig;
   if (!p || !p.items.length) {
@@ -796,7 +811,7 @@ function updateItemBar() {
   bar.innerHTML = p.items
     .map((kind, i) => {
       const info = ITEM_INFO[kind];
-      const armed = armedItem === kind ? " armed" : "";
+      const armed = (armedItem === kind ? " armed" : "") + (padSlot === i ? " padsel" : "");
       return `<button class="item-chip${armed}" data-intent="item" data-arg="${i}" title="${info.label}">` +
         `<span class="ic">${info.icon}</span><span class="ik">${i + 1}</span></button>`;
     })
@@ -891,14 +906,14 @@ function updateSkillBar() {
     cd: g.watcher.skills[s] || 0,
     usable: skillUsable(g, s),
   }));
-  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|");
+  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|") + `|${padSlot}`;
   if (sig === _skillBarSig) return;
   _skillBarSig = sig;
   bar.classList.remove("empty");
   bar.innerHTML = entries
     .map((e, i) => {
       const info = SKILL_INFO[e.skill];
-      const cls = e.cd > 0 ? " cooling" : e.usable ? "" : " unusable";
+      const cls = (e.cd > 0 ? " cooling" : e.usable ? "" : " unusable") + (padSlot === i ? " padsel" : "");
       const badge = e.cd > 0 ? `<span class="cd">${e.cd}</span>` : `<span class="ik">${i + 5}</span>`;
       return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${info.label}">` +
         `<span class="ic">${info.icon}</span>${badge}</button>`;
@@ -1037,6 +1052,12 @@ function handleWatcherIntent(intent, arg) {
     } else if (setBluff(g, arg).ok) {
       app.audio.play("bluff");
     }
+  } else if (intent === "slotCursor") {
+    // Same cursor, but on the Watcher's turn it indexes the skill row.
+    padSlot = arg;
+    _skillBarSig = "";
+  } else if (intent === "useSlot") {
+    doUseSkill(Object.values(SKILLS)[arg] || SKILLS.WIDE_SCAN);
   } else if (intent === "skill") {
     doUseSkill(arg);
   } else if (intent === "endTurn") {

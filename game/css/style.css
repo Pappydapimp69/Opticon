@@ -298,3 +298,4 @@ html, body {
 .skill-chip.unusable { opacity: .6; }
 .skill-chip:not(.cooling):not(.unusable) { border-color: #4a6f9f; }
 @media (max-width: 720px) { .skill-bar { bottom: 210px; } }
+.item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }

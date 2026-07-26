@@ -14,6 +14,7 @@ export class Input {
     this.padPrev = [];
     this.padPressed = []; // current-frame gamepad button state, for hold checks
     this._stickHeld = false;
+    this.slotCursor = 0; // gamepad item/skill slot selection (LT cycles, RT fires)
     this.activeScheme = "keyboard";
     this.menuHandlers = null; // { navX(dir), navY(dir), select(), back() }
     this.passHandler = null; // () => void — hotseat "pass the device" gate
@@ -230,6 +231,18 @@ export class Input {
     if (edge(1)) this.onIntent("bluff", 1);   // B
     if (edge(2)) this.onIntent("bluff", 3);   // X
     if (edge(9)) this.onIntent("cycleView");  // Start
+    // Items + skills had NO gamepad route at all — they were keyboard
+    // (1-8) and touch-chip only, so a pad player simply could not use half
+    // the verbs the game now has. LT (6) cycles which slot is selected and
+    // RT (7) fires it, rather than claiming four more face buttons that are
+    // already spoken for by bluff/rotate/endTurn. Which LIST the slot
+    // indexes into is decided by whose turn it is, the same one-role-per-
+    // turn split every other shared binding here relies on.
+    if (edge(6)) {
+      this.slotCursor = (this.slotCursor + 1) % 4;
+      this.onIntent("slotCursor", this.slotCursor);
+    }
+    if (edge(7)) this.onIntent("useSlot", this.slotCursor);
     this.padPrev = pressed;
   }
 }
