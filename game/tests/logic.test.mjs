@@ -12,7 +12,7 @@ import {
   isWalkable,
   MP_PER_TURN,
 } from "../src/rules.js";
-import { playWatcherTurn } from "../src/watcherAI.js";
+import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
 import { prisonerPassable, bfsPath } from "../src/pathfind.js";
 
@@ -303,6 +303,10 @@ for (const diff of ["easy", "medium", "hard"]) {
   const actions = playWatcherTurn(g, diff, 42);
   ok(actions.length > 0, `${diff}: AI produced actions`);
   ok(g.turn === "Prisoner" || g.status !== "playing", `${diff}: initiative returned to prisoner`);
+  ok(
+    Array.isArray(g.watcher.suspicion) && g.watcher.suspicion.length === 4 && g.watcher.suspicion.every(Number.isFinite),
+    `${diff}: suspicion memory stays a finite 4-vector after a turn`
+  );
 }
 
 // --- A full simulated game terminates -------------------------------------
@@ -381,6 +385,35 @@ for (const seed of [3816266512, 2323661502, 3689921436]) {
     playWatcherTurn(g, "easy", seed);
   }
   ok(g.status !== "playing", `seed ${seed}: resolves within 120 rounds (was: never terminated)`);
+}
+
+// --- Watcher AI suspicion memory actually differentiates difficulty -------
+// DIFFICULTY.memory (easy:1, medium:2, hard:3) was defined but never read by
+// any decision logic — dead config, identical behavior regardless of value.
+// blendSuspicion now uses it: alpha = 1/memory, so memory=1 fully replaces
+// suspicion with this turn's raw score (no memory at all) while memory=3
+// retains part of a past turn's signal even after the current turn's raw
+// score for that direction has dropped to 0 (e.g. the noise that raised it
+// already aged out of game.noise). Tested in isolation from noiseWeight/
+// exitBias (which also vary by difficulty) so this checks memory specifically.
+section("watcher AI suspicion memory differentiates difficulty (regression)");
+{
+  const lowMem = { watcher: { suspicion: [0, 0, 0, 0] } };
+  const highMem = { watcher: { suspicion: [0, 0, 0, 0] } };
+
+  blendSuspicion(lowMem, [0, 10, 0, 0], { memory: 1 });
+  blendSuspicion(highMem, [0, 10, 0, 0], { memory: 3 });
+
+  // Turn 2: the signal is gone, as if the noise that raised it expired.
+  blendSuspicion(lowMem, [0, 0, 0, 0], { memory: 1 });
+  blendSuspicion(highMem, [0, 0, 0, 0], { memory: 3 });
+
+  ok(lowMem.watcher.suspicion[1] === 0, "memory=1: suspicion fully resets the turn after the signal disappears");
+  ok(highMem.watcher.suspicion[1] > 0, "memory=3: suspicion is still elevated the turn after the signal disappears");
+  ok(
+    highMem.watcher.suspicion[1] > lowMem.watcher.suspicion[1],
+    "higher memory retains more residual suspicion than lower memory"
+  );
 }
 
 // --- Summary --------------------------------------------------------------

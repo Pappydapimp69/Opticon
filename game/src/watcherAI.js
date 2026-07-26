@@ -25,6 +25,18 @@ export const DIFFICULTY = Object.freeze({
   hard: { bluffChance: 0.7, exitBias: 0.9, noiseWeight: 2.0, memory: 3 },
 });
 
+// Blend this turn's raw scores into game.watcher.suspicion so a harder AI
+// (larger `memory`) stays wary of a direction for several turns after the
+// noise that raised it has already aged out of game.noise, instead of fully
+// resetting its attention every single turn. memory=1 (easy) means alpha=1:
+// suspicion === this turn's raw scores, i.e. no memory at all.
+function blendSuspicion(game, scores, tuning) {
+  const alpha = 1 / Math.max(1, tuning.memory);
+  const s = game.watcher.suspicion || (game.watcher.suspicion = [0, 0, 0, 0]);
+  for (let d = 0; d < 4; d++) s[d] = s[d] * (1 - alpha) + scores[d] * alpha;
+  return s;
+}
+
 // Score each of the 4 cardinal directions by how much "suspicion" it holds.
 function scoreDirections(game, tuning) {
   const { center } = game.map;
@@ -71,7 +83,7 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
   const actions = [];
   if (isOver(game) || game.turn !== "Watcher") return actions;
 
-  const scores = scoreDirections(game, tuning);
+  const scores = blendSuspicion(game, scoreDirections(game, tuning), tuning);
   const cur = game.watcher.facing;
 
   // Best reachable direction this turn (can only rotate +/-1 step, i.e. 90 deg).
@@ -122,4 +134,4 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
   return actions;
 }
 
-export { scoreDirections };
+export { scoreDirections, blendSuspicion };

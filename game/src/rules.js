@@ -68,6 +68,12 @@ export function createGame(map, opts = {}) {
       facing: opts.watcherFacing ?? 0,
       bluff: null, // a direction index the Watcher claims to also be watching
       rotatedThisTurn: false,
+      // AI-controlled-only bookkeeping: an exponentially-blended running
+      // suspicion per cardinal direction, letting a harder AI stay wary of a
+      // direction after the noise that raised it has already expired out of
+      // `noise` (see watcherAI.js DIFFICULTY.memory). Unused for a
+      // human-controlled Watcher.
+      suspicion: [0, 0, 0, 0],
     },
     // Which side has the initiative this turn.
     turn: "Prisoner", // "Prisoner" | "Watcher"
