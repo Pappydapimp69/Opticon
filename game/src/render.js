@@ -27,6 +27,7 @@ const COLORS = {
   bluff: 0xf7c14a,
   noise: 0xff5757,
   pathPreview: 0xf5e6a8,
+  captureFlash: 0xffffff,
 };
 
 // World scale: one grid tile == TILE_W world units.
@@ -472,14 +473,25 @@ export class Renderer {
     this.walk.t = 0;
   }
 
-  triggerPing(x, y) {
+  // `color` defaults to the noise-ping red; pass COLORS.captureFlash for a
+  // distinct white flash at a capture — same pooled ring, own material
+  // instance per slot, so recoloring one trigger never bleeds into another.
+  triggerPing(x, y, color = COLORS.noise) {
     const slot = this.pings.find((p) => !p.active) || this.pings[0];
     slot.active = true;
     slot.t = 0;
     slot.x = x;
     slot.y = y;
+    slot.mesh.material.color.setHex(color);
     slot.mesh.visible = true;
     slot.mesh.position.set(this.worldX(x), 0.05, this.worldZ(y));
+  }
+
+  // A capture had no in-world visual moment before this — just a banner and
+  // a sound cue, with nothing spatial in the Watcher's own tower view. Reuses
+  // the same pooled ping ring, recolored, rather than a whole new effect.
+  triggerCaptureFlash(x, y) {
+    this.triggerPing(x, y, COLORS.captureFlash);
   }
 
   setViewMode(mode) {
