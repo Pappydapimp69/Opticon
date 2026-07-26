@@ -5,6 +5,7 @@ import { generateMap, DIR_VEC, OBJ } from "./map.js";
 import {
   createGame,
   moveActivePrisoner,
+  breakWindow,
   endPrisonerTurn,
   rotateWatcher,
   setBluff,
@@ -23,7 +24,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.14.0";
+const BUILD = "beta-0.15.0";
 
 const app = {
   renderer: null,
@@ -452,6 +453,8 @@ function applyVolumeUI() {
 function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
   app.stagedPath = [];
+  breakArmed = false;
+  updateBreakToggleUI();
   // Fresh seed each game for variety, but reproducible within a game.
   app.config.seed = (Math.floor(Math.random() * 1e9) >>> 0) || 1;
   const map = generateMap(app.config.seed);
@@ -509,7 +512,7 @@ function hintFor() {
     if (prisoner) {
       return staged
         ? "Stick / D-pad: extend or undo the path  ·  A: commit the move  ·  Start: change view"
-        : "Left stick / D-pad: plan a path (traced, not moved yet)  ·  A: end turn  ·  Start: change view";
+        : "Left stick / D-pad: plan a path (traced, not moved yet)  ·  A: end turn  ·  Hold RB + direction: break a window  ·  Start: change view";
     }
     return "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  A: scan & end turn  ·  Start: change view";
   }
@@ -517,14 +520,14 @@ function hintFor() {
     if (prisoner) {
       return staged
         ? "Tap arrows to extend/undo the path  ·  Commit: move for real  ·  View: change camera"
-        : "Tap arrows to plan a path (traced, not moved yet)  ·  End: end turn  ·  View: change camera";
+        : "Tap arrows to plan a path (traced, not moved yet)  ·  💥: arm a window break, then tap a direction  ·  End: end turn  ·  View: change camera";
     }
     return "Rotate / bluff with the buttons  ·  Scan: end turn  ·  View: change camera";
   }
   if (prisoner) {
     return staged
       ? "WASD / arrows: extend or undo the path  ·  Space: commit the move  ·  V: view"
-      : "WASD / arrows: plan a path (traced on the floor, not moved yet)  ·  Space: end turn  ·  V: view  ·  reach the green gate";
+      : "WASD / arrows: plan a path (traced on the floor, not moved yet)  ·  Shift + direction: break a window  ·  Space: end turn  ·  V: view  ·  reach the green gate";
   }
   return "Q / E: rotate 90°  ·  1-4: bluff a direction  ·  Space: scan & end turn  ·  V: view";
 }
@@ -555,9 +558,34 @@ function humanControlsWatcher() {
   return app.config.mode === "hotseat" || app.config.humanRole === "Watcher";
 }
 
+// Touch has no Shift/RB modifier to hold, so a toggle arms the NEXT dpad tap
+// as a break instead of a move — cleared the moment it's used (or the turn
+// changes), so it can never linger and silently reinterpret a later tap.
+let breakArmed = false;
+function updateBreakToggleUI() {
+  const btn = document.getElementById("breakToggle");
+  if (btn) btn.classList.toggle("armed", breakArmed);
+}
+
 function handlePrisonerIntent(intent, arg) {
   if (!humanControlsPrisoner()) return; // AI prisoner; ignore input
+  if (intent === "toggleBreak") {
+    breakArmed = !breakArmed;
+    app.audio.play("ui");
+    updateBreakToggleUI();
+    return;
+  }
+  if (intent === "break") {
+    doBreakWindow(arg);
+    return;
+  }
   if (intent === "move") {
+    if (breakArmed) {
+      breakArmed = false;
+      updateBreakToggleUI();
+      doBreakWindow(arg);
+      return;
+    }
     stagePathExtend(arg);
   } else if (intent === "endTurn") {
     // The confirm button is overloaded: commit a staged path if one exists,
@@ -565,6 +593,31 @@ function handlePrisonerIntent(intent, arg) {
     if (app.stagedPath.length) commitStagedPath();
     else doEndPrisonerTurn();
   }
+}
+
+// Breaking a window always acts on the prisoner's REAL current position
+// (rules.js's breakWindow, like door/switch, never relocates the mover) —
+// so it's refused outright while a move is still staged (unresolved),
+// rather than silently breaking relative to a position the player hasn't
+// actually committed to yet.
+function doBreakWindow(dir) {
+  const g = app.game;
+  if (!g || g.turn !== "Prisoner") return;
+  if (app.stagedPath.length) {
+    app.audio.play("blocked");
+    return;
+  }
+  const r = breakWindow(g, dir);
+  if (r.ok) {
+    app.audio.play("glass");
+    app.renderer.triggerPing(r.x, r.y);
+  } else {
+    app.audio.play("blocked");
+  }
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+  app.ui.hint(hintFor());
+  updateCommitButton();
 }
 
 // ---- Staged movement: nothing moves for real until the player commits ----
@@ -857,8 +910,12 @@ function loop(t) {
   pollIntroHold(t);
   pollStartHold(t);
   updateDangerVignette();
-  // Safety net: a staged path only makes sense during the Prisoner's own turn.
-  if (app.game && app.game.turn !== "Prisoner") resetStagedPath();
+  // Safety net: a staged path (and an armed break) only make sense during
+  // the Prisoner's own turn.
+  if (app.game && app.game.turn !== "Prisoner") {
+    resetStagedPath();
+    if (breakArmed) { breakArmed = false; updateBreakToggleUI(); }
+  }
   if (app.renderer && app.game) {
     const activePrisoner = app.game.prisoners[app.game.activePrisoner];
     const result = app.renderer.update(app.game, dt, {

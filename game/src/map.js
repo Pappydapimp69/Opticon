@@ -17,7 +17,9 @@ export const TILE = Object.freeze({
 export const OBJ = Object.freeze({
   NONE: 0,
   DOOR: 1, // blocks until opened; opening is silent, costs 1 MP
-  GLASS: 2, // walkable but always makes noise
+  GLASS: 2, // a breakable window on a WALL tile; blocks until broken (loud,
+  // costs 1 MP), then passable + sight-open permanently — a deliberate
+  // shortcut/distraction tool, not a floor hazard.
   SWITCH: 3, // toggles a linked light group; silent, costs 1 MP
   EXIT: 4, // reach it to win (prisoner)
   LIGHT: 5, // a lamp fixture; emits light when its group is on
@@ -122,8 +124,9 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
   // --- Lights + switches: each ring gets a few lamp fixtures grouped to a switch.
   const lights = placeLightsAndSwitches(tiles, objects, ring, lightGroup, size, c, cfg, rng);
 
-  // --- Glass shards (noise traps) sprinkled on floors.
-  scatterGlass(tiles, objects, ring, size, rng, cfg);
+  // --- Windows: breakable shortcuts on "thin" wall segments (floor on both
+  // opposite sides), so breaking one actually connects two areas.
+  placeWindows(tiles, objects, ring, size, rng, cfg);
 
   // --- Doors on some ring boundaries so movement inward needs effort.
   addBoundaryDoors(tiles, objects, ring, size, c, cfg, rng);
@@ -191,15 +194,22 @@ function scatterWalls(tiles, objects, ring, size, c, rng, cfg) {
   }
 }
 
-function scatterGlass(tiles, objects, ring, size, rng, cfg) {
-  const attempts = size * size * 0.03;
+// A window only makes sense on a "thin" wall segment — one with FLOOR on
+// both opposite sides (N/S or E/W) — so breaking it actually joins two
+// areas into a shortcut, rather than opening onto a dead corner or the
+// moat/tower. Placed independently of `ring` (a wall tile between two rings
+// has `ring === 0` itself, which would incorrectly skip every candidate).
+function placeWindows(tiles, objects, ring, size, rng, cfg) {
+  const attempts = size * size * 0.05;
   for (let i = 0; i < attempts; i++) {
     const x = 1 + Math.floor(rng() * (size - 2));
     const y = 1 + Math.floor(rng() * (size - 2));
-    if (ring[y][x] === 0) continue;
-    if (tiles[y][x] === TILE.FLOOR && objects[y][x] === OBJ.NONE && rng() < 0.5) {
-      objects[y][x] = OBJ.GLASS;
-    }
+    if (tiles[y][x] !== TILE.WALL) continue;
+    if (objects[y][x] !== OBJ.NONE) continue;
+    const nsOpen = tiles[y - 1][x] === TILE.FLOOR && tiles[y + 1][x] === TILE.FLOOR;
+    const ewOpen = tiles[y][x - 1] === TILE.FLOOR && tiles[y][x + 1] === TILE.FLOOR;
+    if (!nsOpen && !ewOpen) continue;
+    if (rng() < 0.35) objects[y][x] = OBJ.GLASS;
   }
 }
 

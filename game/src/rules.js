@@ -5,7 +5,8 @@
 //  * Asymmetric turn-based. Prisoner(s) sneak outward-in / toward an EXIT; the
 //    Watcher sits in the tower and hunts by inference, not direct sight.
 //  * A prisoner has MOVE POINTS per turn. A quiet 1-tile step is safe; moving
-//    2+ tiles in a turn, or stepping on glass, emits NOISE revealing a tile.
+//    2+ tiles in a turn emits NOISE revealing a tile. Breaking a window
+//    (a deliberate act, not automatic movement) is always loud too.
 //  * The Watcher can only rotate 90 deg/turn and may BLUFF a second direction to
 //    spread paranoia. A prisoner caught inside the Watcher's true 90 deg gaze
 //    wedge (and lit / in-noise) is captured.
@@ -89,6 +90,7 @@ export function createGame(map, opts = {}) {
     status: "playing", // "playing" | "escaped" | "captured"
     winner: null, // "Prisoner" | "Watcher"
     openedDoors: new Set(), // global door state (shared world)
+    brokenWindows: new Set(), // global, permanent — a broken window stays broken
     lightState,
   };
 }
@@ -111,9 +113,20 @@ export function isDoorOpen(game, x, y) {
   return game.openedDoors.has(y * game.map.size + x);
 }
 
+// A window, once broken, stays broken (permanent, unlike a door which can
+// only ever be opened anyway — this is just the equivalent query for glass).
+export function isWindowBroken(game, x, y) {
+  return game.brokenWindows.has(y * game.map.size + x);
+}
+
 // Can a prisoner stand on / move into this tile right now?
 export function isWalkable(game, x, y) {
-  if (tileAt(game, x, y) !== TILE.FLOOR) return false;
+  const t = tileAt(game, x, y);
+  if (t === TILE.WALL) {
+    // A broken window is the one way a WALL tile ever becomes walkable.
+    return objAt(game, x, y) === OBJ.GLASS && isWindowBroken(game, x, y);
+  }
+  if (t !== TILE.FLOOR) return false;
   const o = objAt(game, x, y);
   if (o === OBJ.LIGHT) return false; // solid lamp fixture
   if (o === OBJ.DOOR && !isDoorOpen(game, x, y)) return false; // closed door blocks
@@ -123,7 +136,11 @@ export function isWalkable(game, x, y) {
 // Does this tile block line of sight (for FoV rays)?
 export function blocksSight(game, x, y) {
   const t = tileAt(game, x, y);
-  if (t === TILE.WALL || t === TILE.TOWER || t === TILE.MOAT) return true;
+  if (t === TILE.WALL || t === TILE.TOWER || t === TILE.MOAT) {
+    // A broken window punches a sightline through what was a solid wall.
+    if (t === TILE.WALL && objAt(game, x, y) === OBJ.GLASS && isWindowBroken(game, x, y)) return false;
+    return true;
+  }
   const o = objAt(game, x, y);
   if (o === OBJ.DOOR && !isDoorOpen(game, x, y)) return true;
   if (o === OBJ.LIGHT) return true;
@@ -255,13 +272,6 @@ export function moveActivePrisoner(game, dir) {
   p.mp -= 1;
 
   let event = "move";
-  // Glass always makes immediate noise at the landing tile.
-  if (o === OBJ.GLASS) {
-    addNoise(game, nx, ny, "glass");
-    pushSelfNoise(p, nx, ny);
-    event = "glass";
-    logMsg(game, `Glass crunches under the Prisoner's step.`);
-  }
 
   // Reached the exit?
   if (o === OBJ.EXIT) {
@@ -271,6 +281,38 @@ export function moveActivePrisoner(game, dir) {
   }
 
   return { ok: true, event, x: nx, y: ny };
+}
+
+// Break a window: a DELIBERATE alternate action, not automatic movement —
+// unlike a door (silent, opens on approach), a window is loud on purpose,
+// so breaking one is always a real choice: create a shortcut on your own
+// path, or break a DIFFERENT one nearby purely as a distraction. Costs 1 MP,
+// stays put (matches door/switch — "interact in place" tiles never relocate
+// the mover), and the break is permanent (unlike a door it can never be
+// closed again either way).
+export function breakWindow(game, dir) {
+  if (game.turn !== "Prisoner" || game.status !== "playing") {
+    return { ok: false, reason: "not-your-turn" };
+  }
+  const p = game.prisoners[game.activePrisoner];
+  if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
+  if (p.mp <= 0) return { ok: false, reason: "no-mp" };
+
+  const { dx, dy } = DIR_VEC[dir];
+  const nx = p.x + dx;
+  const ny = p.y + dy;
+
+  if (tileAt(game, nx, ny) !== TILE.WALL || objAt(game, nx, ny) !== OBJ.GLASS) {
+    return { ok: false, reason: "no-window" };
+  }
+  if (isWindowBroken(game, nx, ny)) return { ok: false, reason: "already-broken" };
+
+  game.brokenWindows.add(ny * game.map.size + nx);
+  p.mp -= 1;
+  addNoise(game, nx, ny, "glass");
+  pushSelfNoise(p, nx, ny);
+  logMsg(game, `Glass shatters — a window breaks open.`);
+  return { ok: true, event: "window-break", x: nx, y: ny };
 }
 
 // End the prisoner's turn: resolve movement noise, hand initiative to Watcher.
