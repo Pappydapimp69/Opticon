@@ -1,5 +1,5 @@
 // Node test harness for Opticon core logic. Run: node game/tests/logic.test.mjs
-import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng } from "../src/map.js";
+import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng, MAP_DEFAULTS } from "../src/map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -417,6 +417,24 @@ section("watcher AI suspicion memory differentiates difficulty (regression)");
     highMem.watcher.suspicion[1] > lowMem.watcher.suspicion[1],
     "higher memory retains more residual suspicion than lower memory"
   );
+}
+
+// --- Multi-prisoner spawns (AI prisoners) ----------------------------------
+section("multi-prisoner spawns");
+for (let seed = 1; seed <= 40; seed++) {
+  const m = generateMap(seed, { ...MAP_DEFAULTS, prisonerCount: 3 });
+  ok(m.spawns.length === 3, `seed ${seed}: 3 spawn points generated`);
+  ok(m.spawns[0].x === m.spawn.x && m.spawns[0].y === m.spawn.y, `seed ${seed}: spawns[0] is the primary spawn`);
+  for (const s of m.spawns) {
+    ok(m.tiles[s.y][s.x] === TILE.FLOOR, `seed ${seed}: spawn (${s.x},${s.y}) is floor`);
+    const path = bfsPath(m, s.x, s.y, m.exit.x, m.exit.y, null);
+    ok(!!path, `seed ${seed}: spawn (${s.x},${s.y}) can reach the exit`);
+  }
+}
+{
+  // prisonerCount defaulting to 1 must be a pure no-op vs the pre-existing shape.
+  const m = generateMap(7);
+  ok(m.spawns.length === 1, "default prisonerCount (1) still produces exactly one spawn");
 }
 
 // --- Windows: breakable wall shortcuts (glass redesign) --------------------

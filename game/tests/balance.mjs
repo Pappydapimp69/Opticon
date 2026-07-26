@@ -1,7 +1,7 @@
 // balance.mjs — Simulate many full games (headless, pure logic) to check that
 // both outcomes are reachable and difficulty tiers actually differ.
 // Run: node game/tests/balance.mjs [gamesPerDiff]
-import { generateMap } from "../src/map.js";
+import { generateMap, MAP_DEFAULTS } from "../src/map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -13,8 +13,16 @@ import { prisonerAITurn } from "../src/prisonerAI.js";
 
 const GAMES = Number(process.argv[2] || 300);
 const MAX_ROUNDS = 120;
+// Matches main.js's PRISONER_COUNT — single-player modes field a group, not
+// a lone prisoner, so the balance oracle should measure the game shape
+// players actually see.
+const PRISONER_COUNT = 3;
 
 function prisonerPolicy(g, rng) {
+  // With multiple prisoners, guard.round only advances the CURRENTLY active
+  // one each call — this fires once per guard iteration, same as the
+  // original 1-prisoner loop, and nextActivePrisoner cycles through the
+  // rest automatically via endWatcherTurn.
   prisonerAITurn(g, rng);
 }
 
@@ -32,8 +40,8 @@ function simulate(difficulty, n) {
   let escaped = 0, captured = 0, timeout = 0, totalRounds = 0;
   for (let i = 0; i < n; i++) {
     const seed = (i * 2654435761) >>> 0 || 1;
-    const map = generateMap(seed);
-    const g = createGame(map, { watcherFacing: seed % 4 });
+    const map = generateMap(seed, { ...MAP_DEFAULTS, prisonerCount: PRISONER_COUNT });
+    const g = createGame(map, { watcherFacing: seed % 4, prisoners: map.spawns });
     const rng = mulberry(seed ^ 0x9e3779b9);
     let guard = MAX_ROUNDS;
     while (!isOver(g) && guard-- > 0) {

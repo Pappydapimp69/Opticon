@@ -43,7 +43,12 @@ export class UI {
   // either — that's the entire point of the asymmetry.
   updateHud(game, viewMode, humanRole, showWatcherInfo) {
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
-    this.el.turn.textContent = game.turn;
+    // With AI companions in play, name which one is acting — otherwise a
+    // group of 3 reads identically to a lone prisoner on the Turn stat.
+    this.el.turn.textContent =
+      game.turn === "Prisoner" && game.prisoners.length > 1
+        ? `Prisoner ${game.activePrisoner + 1}/${game.prisoners.length}`
+        : game.turn;
     this.el.turn.className = "val " + (game.turn === "Watcher" ? "watcher" : "prisoner");
     this.el.facing.textContent = showWatcherInfo
       ? DIRS[game.watcher.facing] + (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")

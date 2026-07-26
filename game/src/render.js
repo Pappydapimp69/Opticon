@@ -304,33 +304,40 @@ export class Renderer {
     this.groups.props = propGroup;
     this.scene.add(propGroup);
 
-    // --- Prisoner avatar.
-    const avatar = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.24, 0.4, 6, 12),
-      new THREE.MeshLambertMaterial({ color: COLORS.prisoner, emissive: 0x0a3a44 })
-    );
-    body.position.y = 0.5;
-    avatar.add(body);
-    const halo = new THREE.Mesh(
-      new THREE.RingGeometry(0.34, 0.44, 24),
-      new THREE.MeshBasicMaterial({ color: COLORS.prisoner, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
-    );
-    halo.rotation.x = -Math.PI / 2;
-    halo.position.y = 0.04;
-    avatar.add(halo);
-    const pLight = new THREE.PointLight(COLORS.prisoner, 0.5, 4, 2);
-    pLight.position.y = 0.7;
-    avatar.add(pLight);
-    this.avatar = avatar;
-    this.avatarHalo = halo;
-    this.groups.avatar = avatar;
-    this.scene.add(avatar);
-
-    // Walk queue: when a committed move covers multiple tiles, the avatar
-    // visibly steps through each one in order (with fired arrival events)
-    // instead of sliding straight from the old tile to the final one.
-    this.walk = { queue: [], from: null, t: 0, stepDur: 0.22 };
+    // --- Prisoner avatars — one per prisoner in this game (AI companions
+    // included), each with its own walk-queue so a committed human move and
+    // an AI companion's move never fight over shared position/animation state.
+    this.avatars = game.prisoners.map(() => {
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.24, 0.4, 6, 12),
+        new THREE.MeshLambertMaterial({ color: COLORS.prisoner, emissive: 0x0a3a44 })
+      );
+      body.position.y = 0.5;
+      group.add(body);
+      const halo = new THREE.Mesh(
+        new THREE.RingGeometry(0.34, 0.44, 24),
+        new THREE.MeshBasicMaterial({ color: COLORS.prisoner, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+      );
+      halo.rotation.x = -Math.PI / 2;
+      halo.position.y = 0.04;
+      group.add(halo);
+      const pLight = new THREE.PointLight(COLORS.prisoner, 0.5, 4, 2);
+      pLight.position.y = 0.7;
+      group.add(pLight);
+      return {
+        group,
+        halo,
+        // When a committed move covers multiple tiles, the avatar visibly
+        // steps through each one in order (with fired arrival events)
+        // instead of sliding straight from the old tile to the final one.
+        walk: { queue: [], from: null, t: 0, stepDur: 0.22 },
+      };
+    });
+    const avatarGroup = new THREE.Group();
+    for (const a of this.avatars) avatarGroup.add(a.group);
+    this.groups.avatars = avatarGroup;
+    this.scene.add(avatarGroup);
 
     // --- Watcher gaze wedge (a flat sector on the ground).
     this.gazeMesh = this.makeWedge(COLORS.gaze, 0.22);
@@ -473,12 +480,15 @@ export class Renderer {
     return mesh;
   }
 
-  // Enqueue a sequence of grid tiles {x,y,event} for the avatar to visibly
-  // walk through in order, starting from `from`. Replaces any prior queue.
-  walkTo(from, steps) {
-    this.walk.queue = steps.slice();
-    this.walk.from = { x: from.x, y: from.y };
-    this.walk.t = 0;
+  // Enqueue a sequence of grid tiles {x,y,event} for prisoner `prisonerIndex`'s
+  // avatar to visibly walk through in order, starting from `from`. Replaces
+  // any prior queue for that specific prisoner only.
+  walkTo(prisonerIndex, from, steps) {
+    const a = this.avatars[prisonerIndex];
+    if (!a) return;
+    a.walk.queue = steps.slice();
+    a.walk.from = { x: from.x, y: from.y };
+    a.walk.t = 0;
   }
 
   // `color` defaults to the noise-ping red; pass COLORS.captureFlash for a
@@ -521,40 +531,44 @@ export class Renderer {
     const map = game.map;
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
 
-    // Avatar position: walk a queued path tile-by-tile if one is active (a
-    // just-committed move — Brain telegraph#E6: the sim already resolved
-    // this, only the visual catches up), otherwise smoothly settle toward the
-    // prisoner's real tile (AI moves, teleports, idle).
-    const arrived = [];
-    if (this.walk.queue.length) {
-      const target = this.walk.queue[0];
-      this.walk.t = Math.min(1, this.walk.t + dt / this.walk.stepDur);
-      const te = easeInOutQuad(this.walk.t);
-      this.avatar.position.x =
-        this.worldX(this.walk.from.x) + (this.worldX(target.x) - this.worldX(this.walk.from.x)) * te;
-      this.avatar.position.z =
-        this.worldZ(this.walk.from.y) + (this.worldZ(target.y) - this.worldZ(this.walk.from.y)) * te;
-      if (this.walk.t >= 1) {
-        this.walk.from = { x: target.x, y: target.y };
-        this.walk.queue.shift();
-        this.walk.t = 0;
-        arrived.push(target);
-      }
-    } else {
-      const targetAX = this.worldX(p.x);
-      const targetAZ = this.worldZ(p.y);
-      const k = smoothing(dt, 0.1);
-      this.avatar.position.x += (targetAX - this.avatar.position.x) * k;
-      this.avatar.position.z += (targetAZ - this.avatar.position.z) * k;
-    }
-    // Fairness: the Watcher never sees prisoners directly. `showPrisoner` is
-    // decided by the caller (hidden for a pure Watcher; hidden on the Watcher's
-    // turn in hotseat). Falls back to visible when unspecified.
+    // Avatar position, per prisoner: walk a queued path tile-by-tile if one
+    // is active for THAT prisoner (a just-committed move — Brain
+    // telegraph#E6: the sim already resolved this, only the visual catches
+    // up), otherwise smoothly settle toward its real tile (AI moves,
+    // teleports, idle). Fairness: the Watcher never sees prisoners directly
+    // — `showPrisoner` (decided by the caller) applies to the whole group
+    // uniformly, hidden for a pure Watcher or on the Watcher's turn in hotseat.
     const showPrisoner = opts.showPrisoner !== undefined ? opts.showPrisoner : true;
-    this.avatar.visible = showPrisoner && p.alive && !p.escaped;
-    // Pulse halo.
-    const pulse = 0.4 + 0.2 * Math.sin(this.time * 4);
-    this.avatarHalo.material.opacity = pulse;
+    const arrived = [];
+    for (let i = 0; i < game.prisoners.length; i++) {
+      const pr = game.prisoners[i];
+      const av = this.avatars[i];
+      if (!av) continue;
+      if (av.walk.queue.length) {
+        const target = av.walk.queue[0];
+        av.walk.t = Math.min(1, av.walk.t + dt / av.walk.stepDur);
+        const te = easeInOutQuad(av.walk.t);
+        av.group.position.x =
+          this.worldX(av.walk.from.x) + (this.worldX(target.x) - this.worldX(av.walk.from.x)) * te;
+        av.group.position.z =
+          this.worldZ(av.walk.from.y) + (this.worldZ(target.y) - this.worldZ(av.walk.from.y)) * te;
+        if (av.walk.t >= 1) {
+          av.walk.from = { x: target.x, y: target.y };
+          av.walk.queue.shift();
+          av.walk.t = 0;
+          arrived.push(target);
+        }
+      } else {
+        const targetAX = this.worldX(pr.x);
+        const targetAZ = this.worldZ(pr.y);
+        const k = smoothing(dt, 0.1);
+        av.group.position.x += (targetAX - av.group.position.x) * k;
+        av.group.position.z += (targetAZ - av.group.position.z) * k;
+      }
+      av.group.visible = showPrisoner && pr.alive && !pr.escaped;
+      // Pulse halo, phase-offset per prisoner so a group doesn't pulse in lockstep.
+      av.halo.material.opacity = 0.4 + 0.2 * Math.sin(this.time * 4 + i * 0.7);
+    }
 
     // Eye faces watcher facing; color shifts if it just scanned.
     const facing = game.watcher.facing;
