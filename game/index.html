@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=beta-0.17.0" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.18.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -83,7 +83,7 @@
       </div>
 
       <details class="how">
-        <summary>How to play</summary>
+        <summary data-row="5" data-col="0" tabindex="0">How to play</summary>
         <ul>
           <li><b>Prisoner</b> — Move up to 3 tiles/turn (WASD / arrows). A single step is quiet; moving 2+ tiles reveals the tile you started on as <b>noise</b>. Windows can be <b>broken</b> for a loud shortcut or distraction (Shift + direction). Reach the glowing green <b>gate</b> to escape.</li>
           <li><b>Watcher</b> — You sit in the tower and never see prisoners directly. Rotate your 90° gaze (Q/E), <b>bluff</b> a second direction (1–4) to spread paranoia, then press <b>Space</b> to scan &amp; end your turn. A prisoner caught in your true gaze while <b>lit or making noise</b> is captured.</li>
@@ -163,6 +163,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js?v=beta-0.17.0"></script>
+  <script type="module" src="src/main.js?v=beta-0.18.0"></script>
 </body>
 </html>
