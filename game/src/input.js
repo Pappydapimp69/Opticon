@@ -77,12 +77,15 @@ export class Input {
       if (m[e.code]) { e.preventDefault(); m[e.code](); }
       return;
     }
-    // Game.
+    // Game. Shift+direction breaks a window that direction instead of moving
+    // — a deliberate modifier so breaking is always an explicit choice, never
+    // accidental fallout of just trying to walk somewhere.
+    const moveOrBreak = (dir) => () => this.onIntent(e.shiftKey ? "break" : "move", dir);
     const map = {
-      ArrowUp: () => this.onIntent("move", 0), KeyW: () => this.onIntent("move", 0),
-      ArrowRight: () => this.onIntent("move", 1), KeyD: () => this.onIntent("move", 1),
-      ArrowDown: () => this.onIntent("move", 2), KeyS: () => this.onIntent("move", 2),
-      ArrowLeft: () => this.onIntent("move", 3), KeyA: () => this.onIntent("move", 3),
+      ArrowUp: moveOrBreak(0), KeyW: moveOrBreak(0),
+      ArrowRight: moveOrBreak(1), KeyD: moveOrBreak(1),
+      ArrowDown: moveOrBreak(2), KeyS: moveOrBreak(2),
+      ArrowLeft: moveOrBreak(3), KeyA: moveOrBreak(3),
       Space: () => this.onIntent("endTurn"), Enter: () => this.onIntent("endTurn"),
       KeyQ: () => this.onIntent("rotate", -1), KeyE: () => this.onIntent("rotate", 1),
       Digit1: () => this.onIntent("bluff", 0), Digit2: () => this.onIntent("bluff", 1),
@@ -192,12 +195,17 @@ export class Input {
       return;
     }
 
-    // Game.
-    if (edge(12)) this.onIntent("move", 0);
-    if (edge(15)) this.onIntent("move", 1);
-    if (edge(13)) this.onIntent("move", 2);
-    if (edge(14)) this.onIntent("move", 3);
-    if (stickDir != null) this.onIntent("move", stickDir);
+    // Game. RB held = break-window modifier for the prisoner's move
+    // direction, mirroring keyboard's Shift+direction (RB's edge-triggered
+    // "rotate" below only ever matters on the Watcher's turn, so the two
+    // uses never actually conflict in practice — only one role's intents
+    // are recognized per turn, see handlePrisonerIntent/handleWatcherIntent).
+    const breakMod = pressed[5];
+    if (edge(12)) this.onIntent(breakMod ? "break" : "move", 0);
+    if (edge(15)) this.onIntent(breakMod ? "break" : "move", 1);
+    if (edge(13)) this.onIntent(breakMod ? "break" : "move", 2);
+    if (edge(14)) this.onIntent(breakMod ? "break" : "move", 3);
+    if (stickDir != null) this.onIntent(breakMod ? "break" : "move", stickDir);
     if (edge(0)) this.onIntent("endTurn");   // A
     if (edge(4)) this.onIntent("rotate", -1); // LB
     if (edge(5)) this.onIntent("rotate", 1);  // RB

@@ -166,12 +166,14 @@ html, body {
 .touch { position: absolute; bottom: 0; left: 0; right: 0; height: 116px; }
 .pad { position: absolute; bottom: 14px; display: none; }
 .pad.active { display: block; }
-.dpad { left: 18px; width: 160px; height: 96px; }
+.dpad { left: 18px; width: 224px; height: 96px; }
 .dpad .tbtn { position: absolute; width: 50px; height: 44px; }
 .dpad .up { left: 55px; top: 0; }
 .dpad .left { left: 0; top: 50px; }
 .dpad .right { left: 110px; top: 50px; }
 .dpad .down { left: 55px; top: 50px; }
+.dpad .break-toggle { left: 174px; top: 26px; width: 44px; height: 44px; }
+.break-toggle.armed { background: rgba(255,77,94,0.35); border-color: var(--watcher); box-shadow: 0 0 14px rgba(255,77,94,0.5); }
 
 .wpad { left: 18px; display: none; gap: 6px; flex-wrap: wrap; max-width: 60vw; }
 .wpad.active { display: flex; }

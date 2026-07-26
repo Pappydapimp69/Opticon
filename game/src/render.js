@@ -131,7 +131,9 @@ export class Renderer {
       for (let x = 0; x < size; x++) {
         const t = map.tiles[y][x];
         if (t === TILE.FLOOR) floors.push({ x, y });
-        else if (t === TILE.WALL) walls.push({ x, y });
+        // A window tile gets its own translucent pane prop below, not the
+        // solid wall block — the two would otherwise overlap at the same cell.
+        else if (t === TILE.WALL && map.objects[y][x] !== OBJ.GLASS) walls.push({ x, y });
         else if (t === TILE.MOAT) moatCount++;
       }
     }
@@ -221,13 +223,14 @@ export class Renderer {
     this.groups.tower = towerGroup;
     this.scene.add(towerGroup);
 
-    // --- Props (doors, glass, switches, lamps, exit) as small meshes.
-    this.props = { doors: new Map(), glass: [], switches: [], lamps: new Map(), exit: null };
+    // --- Props (doors, windows, switches, lamps, exit) as small meshes.
+    this.props = { doors: new Map(), windows: new Map(), switches: [], lamps: new Map(), exit: null };
     const propGroup = new THREE.Group();
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const o = map.objects[y][x];
+        const t = map.tiles[y][x];
         const wx = this.worldX(x);
         const wz = this.worldZ(y);
         if (o === OBJ.DOOR) {
@@ -238,14 +241,19 @@ export class Renderer {
           d.position.set(wx, WALL_H * 0.45, wz);
           propGroup.add(d);
           this.props.doors.set(`${x},${y}`, d);
-        } else if (o === OBJ.GLASS) {
-          const gmesh = new THREE.Mesh(
-            new THREE.IcosahedronGeometry(0.18, 0),
-            new THREE.MeshBasicMaterial({ color: COLORS.glass, transparent: true, opacity: 0.85 })
+        } else if (o === OBJ.GLASS && t === TILE.WALL) {
+          // A translucent pane filling the wall gap — hidden once broken
+          // (see update()'s windows loop), revealing the passage underneath.
+          const wmesh = new THREE.Mesh(
+            new THREE.BoxGeometry(TILE_W * 0.92, WALL_H * 0.92, TILE_W * 0.14),
+            new THREE.MeshPhysicalMaterial({
+              color: COLORS.glass, transparent: true, opacity: 0.5,
+              roughness: 0.1, metalness: 0, side: THREE.DoubleSide,
+            })
           );
-          gmesh.position.set(wx, 0.16, wz);
-          propGroup.add(gmesh);
-          this.props.glass.push(gmesh);
+          wmesh.position.set(wx, WALL_H * 0.46, wz);
+          propGroup.add(wmesh);
+          this.props.windows.set(`${x},${y}`, wmesh);
         } else if (o === OBJ.SWITCH) {
           const s = new THREE.Mesh(
             new THREE.BoxGeometry(0.22, 0.5, 0.22),
@@ -572,6 +580,14 @@ export class Renderer {
       const [dx, dy] = k.split(",").map(Number);
       const open = game.openedDoors.has(dy * map.size + dx);
       mesh.visible = !open;
+    }
+
+    // Windows: hide the pane once broken (permanent — unlike a door, never
+    // toggles back).
+    for (const [k, mesh] of this.props.windows) {
+      const [wx2, wy2] = k.split(",").map(Number);
+      const broken = game.brokenWindows.has(wy2 * map.size + wx2);
+      mesh.visible = !broken;
     }
 
     // Self-noise: this prisoner's own "I heard that" markers. Role-gated only

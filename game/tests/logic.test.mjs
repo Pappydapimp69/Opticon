@@ -3,6 +3,7 @@ import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng } from
 import {
   createGame,
   moveActivePrisoner,
+  breakWindow,
   endPrisonerTurn,
   rotateWatcher,
   watcherScan,
@@ -10,6 +11,8 @@ import {
   computeFoV,
   inWatcherGaze,
   isWalkable,
+  isWindowBroken,
+  blocksSight,
   MP_PER_TURN,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
@@ -414,6 +417,74 @@ section("watcher AI suspicion memory differentiates difficulty (regression)");
     highMem.watcher.suspicion[1] > lowMem.watcher.suspicion[1],
     "higher memory retains more residual suspicion than lower memory"
   );
+}
+
+// --- Windows: breakable wall shortcuts (glass redesign) --------------------
+// Glass moved off the floor onto WALL tiles as a deliberate breakable
+// shortcut/distraction tool, per explicit design feedback — not a passive
+// "make noise when stepped on" floor hazard anymore.
+section("windows: breakable wall shortcuts");
+{
+  let found = null;
+  for (let seed = 1; seed <= 60 && !found; seed++) {
+    const m = generateMap(seed);
+    for (let y = 1; y < m.size - 1 && !found; y++) {
+      for (let x = 1; x < m.size - 1 && !found; x++) {
+        if (m.tiles[y][x] !== TILE.WALL || m.objects[y][x] !== OBJ.GLASS) continue;
+        const cands = [
+          { fx: x, fy: y - 1, dir: 2 }, // floor North of window -> face South to break it
+          { fx: x, fy: y + 1, dir: 0 },
+          { fx: x - 1, fy: y, dir: 1 },
+          { fx: x + 1, fy: y, dir: 3 },
+        ];
+        for (const c of cands) {
+          if (m.tiles[c.fy] && m.tiles[c.fy][c.fx] === TILE.FLOOR) {
+            found = { m, wx: x, wy: y, fx: c.fx, fy: c.fy, dir: c.dir };
+            break;
+          }
+        }
+      }
+    }
+  }
+  ok(!!found, "at least one seed (of 60 tried) has a window with an adjacent floor tile");
+  if (found) {
+    const { m, wx, wy, fx, fy, dir } = found;
+    const g = createGame(m);
+    const p = g.prisoners[0];
+    p.x = fx; p.y = fy; p.startTurnPos = { x: fx, y: fy };
+
+    ok(!isWalkable(g, wx, wy), "unbroken window is not walkable");
+    ok(blocksSight(g, wx, wy), "unbroken window blocks sight");
+    ok(!isWindowBroken(g, wx, wy), "window starts unbroken");
+
+    const mpBefore = p.mp;
+    const r = breakWindow(g, dir);
+    ok(r.ok && r.event === "window-break", "breakWindow succeeds facing a real window");
+    ok(isWindowBroken(g, wx, wy), "window is now broken");
+    ok(isWalkable(g, wx, wy), "broken window is walkable");
+    ok(!blocksSight(g, wx, wy), "broken window no longer blocks sight");
+    ok(p.x === fx && p.y === fy, "breaking a window does not relocate the prisoner (interact-in-place)");
+    ok(p.mp === mpBefore - 1, "breaking a window costs 1 MP");
+    ok(g.noise.some((n) => n.x === wx && n.y === wy), "breaking a window makes noise at that tile");
+
+    const r2 = breakWindow(g, dir);
+    ok(!r2.ok && r2.reason === "already-broken", "breaking an already-broken window fails cleanly");
+  }
+}
+
+// A window can never actually be occupied while unbroken (like a switch —
+// see E5), so it must never be treated as passable for AI pathing or the
+// generator's base spawn->exit connectivity guarantee either.
+section("unbroken windows are excluded from AI pathing (regression)");
+for (let seed = 1; seed <= 25; seed++) {
+  const m = generateMap(seed);
+  for (let y = 0; y < m.size; y++) {
+    for (let x = 0; x < m.size; x++) {
+      if (m.tiles[y][x] === TILE.WALL && m.objects[y][x] === OBJ.GLASS) {
+        ok(!prisonerPassable(m, x, y), `seed ${seed}: unbroken window at (${x},${y}) is not passable for AI pathing`);
+      }
+    }
+  }
 }
 
 // --- Summary --------------------------------------------------------------
