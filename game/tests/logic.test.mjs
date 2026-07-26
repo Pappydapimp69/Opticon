@@ -1,5 +1,5 @@
 // Node test harness for Opticon core logic. Run: node game/tests/logic.test.mjs
-import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng, MAP_DEFAULTS } from "../src/map.js";
+import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng, MAP_DEFAULTS, ITEM_KINDS, ITEM_INFO } from "../src/map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -14,10 +14,17 @@ import {
   isWindowBroken,
   blocksSight,
   MP_PER_TURN,
+  useItem,
+  isItemTaken,
+  distractTarget,
+  ITEM_CAP,
+  isLit,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
 import { prisonerPassable, bfsPath } from "../src/pathfind.js";
+
+function isDoorOpenTest(g, x, y) { return g.openedDoors.has(y * g.map.size + x); }
 
 let passed = 0;
 let failed = 0;
@@ -502,6 +509,197 @@ for (let seed = 1; seed <= 25; seed++) {
         ok(!prisonerPassable(m, x, y), `seed ${seed}: unbroken window at (${x},${y}) is not passable for AI pathing`);
       }
     }
+  }
+}
+
+
+// --- Prisoner items -------------------------------------------------------
+
+// The core placement invariant: an item is only ever scattered on a map that
+// actually contains the object it acts on. A lockpick on a doorless map is
+// an item the player can never spend, which reads as broken rather than
+// unlucky — so the generator validates the pool against the FINISHED map.
+section("items are only placed when the map has what they act on");
+for (let seed = 1; seed <= 60; seed++) {
+  const m = generateMap(seed);
+  const present = new Set();
+  for (const row of m.objects) for (const o of row) present.add(o);
+  for (const it of m.items) {
+    const req = ITEM_INFO[it.kind].requires;
+    ok(req == null || present.has(req),
+      `seed ${seed}: ${it.kind} placed only because its required object exists`);
+    ok(m.objects[it.y][it.x] === OBJ.ITEM, `seed ${seed}: item tile is marked OBJ.ITEM`);
+    ok(m.tiles[it.y][it.x] === TILE.FLOOR, `seed ${seed}: item sits on floor`);
+  }
+}
+
+section("an item tile stays walkable (walk-onto, not interact-in-place)");
+{
+  const m = generateMap(7);
+  const g = createGame(m);
+  for (const it of m.items) {
+    ok(isWalkable(g, it.x, it.y), `item at (${it.x},${it.y}) is walkable`);
+    ok(prisonerPassable(m, it.x, it.y), `item at (${it.x},${it.y}) is passable for AI pathing`);
+  }
+}
+
+section("picking an item up retires the tile immediately");
+{
+  const m = generateMap(11);
+  const it = m.items[0];
+  ok(!!it, "seed 11 produced at least one item");
+  // Stand next to it and step on.
+  const g = createGame(m, { prisoners: [{ x: it.x - 1, y: it.y }] });
+  const p = g.prisoners[0];
+  if (isWalkable(g, it.x - 1, it.y)) {
+    const r = moveActivePrisoner(g, 1); // East onto the item
+    ok(r.ok, "stepped onto the item tile");
+    ok(r.picked === it.kind, `pickup reported the right kind (${r.picked})`);
+    ok(p.items.length === 1 && p.items[0] === it.kind, "item is in the prisoner's inventory");
+    ok(isItemTaken(g, it.x, it.y), "tile is retired the instant it's taken");
+    // A second prisoner walking the same square must not get a ghost copy.
+    const g2 = g;
+    g2.activePrisoner = 0;
+    p.x = it.x - 1; p.y = it.y; p.mp = 3;
+    const r2 = moveActivePrisoner(g2, 1);
+    ok(r2.ok && r2.picked == null, "a second pass over a taken tile picks up nothing");
+  }
+}
+
+section("inventory is capped");
+{
+  const m = generateMap(3);
+  const g = createGame(m);
+  const p = g.prisoners[0];
+  p.items = [ITEM_KINDS.MUFFLE, ITEM_KINDS.DISTRACT];
+  ok(p.items.length === ITEM_CAP, "starts at the cap for this check");
+  // Find an untaken item tile adjacent-reachable; simulate the full-hands path.
+  const it = m.items.find((i) => isWalkable(g, i.x - 1, i.y));
+  if (it) {
+    p.x = it.x - 1; p.y = it.y; p.mp = 3;
+    const r = moveActivePrisoner(g, 1);
+    ok(r.ok && r.picked == null, "a full-handed prisoner leaves the pickup behind");
+    ok(!isItemTaken(g, it.x, it.y), "and the pickup is NOT consumed");
+    ok(p.items.length === ITEM_CAP, "inventory never exceeds the cap");
+  }
+}
+
+section("muffle suppresses movement noise for exactly one turn");
+{
+  const m = generateMap(5);
+  const g = createGame(m);
+  const p = g.prisoners[0];
+  p.items = [ITEM_KINDS.MUFFLE];
+  const r = useItem(g, ITEM_KINDS.MUFFLE, null);
+  ok(r.ok, "muffle applies with no direction needed");
+  ok(p.muffled === true, "prisoner is muffled");
+  ok(p.items.length === 0, "muffle is consumed");
+  // Move 2+ tiles then end turn — normally that reveals the start tile.
+  const start = { ...p.startTurnPos };
+  p.x = start.x + 2; p.y = start.y;
+  endPrisonerTurn(g);
+  ok(!g.noise.some((n) => n.x === start.x && n.y === start.y),
+    "muffled 2-tile move leaves no movement noise");
+  // Next turn it's worn off.
+  endWatcherTurn(g);
+  ok(g.prisoners[g.activePrisoner].muffled === false, "muffle lasts exactly one turn");
+}
+
+section("distract makes noise away from the prisoner, not on them");
+{
+  const m = generateMap(9);
+  const g = createGame(m);
+  const p = g.prisoners[0];
+  p.items = [ITEM_KINDS.DISTRACT];
+  // Find a direction with room to throw.
+  let dir = -1;
+  for (let d = 0; d < 4; d++) if (distractTarget(g, p, d)) { dir = d; break; }
+  if (dir >= 0) {
+    const target = distractTarget(g, p, dir);
+    const r = useItem(g, ITEM_KINDS.DISTRACT, dir);
+    ok(r.ok, "distract throws in a direction");
+    ok(g.noise.some((n) => n.x === target.x && n.y === target.y), "noise lands on the target tile");
+    ok(!g.noise.some((n) => n.x === p.x && n.y === p.y), "no noise on the prisoner's own tile");
+    ok(!p.selfNoise.some((n) => n.x === target.x && n.y === target.y),
+      "a decoy is not recorded as the prisoner's own self-noise");
+    ok(p.items.length === 0, "distract is consumed");
+  }
+  // A decoy at your own feet defeats the purpose and is rejected.
+  const g2 = createGame(generateMap(9));
+  const p2 = g2.prisoners[0];
+  p2.items = [ITEM_KINDS.DISTRACT];
+  const rClose = useItem(g2, ITEM_KINDS.DISTRACT, { x: p2.x, y: p2.y });
+  ok(!rClose.ok && rClose.reason === "too-close", "a decoy on your own tile is rejected");
+  ok(p2.items.length === 1, "a rejected use does not consume the item");
+}
+
+section("lockpick opens an adjacent door for free");
+{
+  let done = false;
+  for (let seed = 1; seed <= 40 && !done; seed++) {
+    const m = generateMap(seed);
+    const g = createGame(m);
+    for (let y = 1; y < m.size - 1 && !done; y++) {
+      for (let x = 1; x < m.size - 1 && !done; x++) {
+        if (m.objects[y][x] !== OBJ.DOOR) continue;
+        const p = g.prisoners[0];
+        // Stand west of the door, use it east.
+        if (!isWalkable(g, x - 1, y)) continue;
+        p.x = x - 1; p.y = y; p.mp = 3;
+        p.items = [ITEM_KINDS.LOCKPICK];
+        const mpBefore = p.mp;
+        const r = useItem(g, ITEM_KINDS.LOCKPICK, 1);
+        ok(r.ok, `seed ${seed}: lockpick opens the adjacent door`);
+        ok(isDoorOpenTest(g, x, y), "door is now open");
+        ok(p.mp === mpBefore, "lockpick costs no MP (that's the point)");
+        ok(p.items.length === 0, "lockpick is consumed");
+        ok(p.x === x - 1 && p.y === y, "using a lockpick does not relocate the prisoner");
+        const r2 = useItem(g, ITEM_KINDS.LOCKPICK, 1);
+        ok(!r2.ok && r2.reason === "not-carried", "can't reuse a spent lockpick");
+        done = true;
+      }
+    }
+  }
+  ok(done, "found a door to test the lockpick against");
+}
+
+section("cutters kill a light group permanently");
+{
+  let done = false;
+  for (let seed = 1; seed <= 40 && !done; seed++) {
+    const m = generateMap(seed);
+    const g = createGame(m);
+    for (let y = 1; y < m.size - 1 && !done; y++) {
+      for (let x = 1; x < m.size - 1 && !done; x++) {
+        if (m.objects[y][x] !== OBJ.SWITCH) continue;
+        if (!isWalkable(g, x - 1, y)) continue;
+        const p = g.prisoners[0];
+        p.x = x - 1; p.y = y; p.mp = 3;
+        p.items = [ITEM_KINDS.CUTTERS];
+        const grp = m.lightGroup[y][x];
+        g.lightState[grp] = true;
+        const r = useItem(g, ITEM_KINDS.CUTTERS, 1);
+        ok(r.ok, `seed ${seed}: cutters work on an adjacent switch`);
+        ok(g.deadLightGroups.has(grp), "the light group is marked dead");
+        ok(g.lightState[grp] === false, "and its lights are off");
+        // The switch can no longer turn it back on.
+        p.mp = 3;
+        const r2 = moveActivePrisoner(g, 1);
+        ok(r2.ok && r2.event === "switch-dead", "the switch no longer responds");
+        ok(g.lightState[grp] === false, "lights stay off after flipping a dead switch");
+        done = true;
+      }
+    }
+  }
+  ok(done, "found a switch to test the cutters against");
+}
+
+section("items reject use when not carried");
+{
+  const g = createGame(generateMap(2));
+  for (const kind of Object.values(ITEM_KINDS)) {
+    const r = useItem(g, kind, 0);
+    ok(!r.ok && r.reason === "not-carried", `${kind} can't be used without carrying it`);
   }
 }
 

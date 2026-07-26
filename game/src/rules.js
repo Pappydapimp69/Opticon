@@ -13,9 +13,10 @@
 //  * Prisoner FoV is cardinal, range-limited, blocked by walls & closed doors,
 //    and gated by tile light level.
 
-import { TILE, OBJ, DIRS, DIR_VEC } from "./map.js";
+import { TILE, OBJ, DIRS, DIR_VEC, ITEM_KINDS, ITEM_INFO } from "./map.js";
 
 export const MP_PER_TURN = 3;
+export const ITEM_CAP = 2; // carried at once — forces a real "which do I keep" choice
 export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher
 export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)
 
@@ -37,6 +38,13 @@ export function createGame(map, opts = {}) {
       // "I heard that" feedback (unlike game.noise, the Watcher's shared
       // multi-turn intel). Reset at the start of each of their turns.
       selfNoise: [],
+      // One-use pickups carried by THIS prisoner (max ITEM_CAP). Per-prisoner,
+      // not shared: a companion picking something up doesn't stock the human's
+      // belt, same as MP.
+      items: [],
+      // Set by the MUFFLE item, cleared when this prisoner's turn ends —
+      // suppresses the movement-noise reveal for exactly one turn.
+      muffled: false,
       // AI-controlled-only bookkeeping to guarantee eventual resolution
       // (resolves T24: a cautious prisoner AI could stall forever against a
       // human Watcher, with no round cap to force it). `stalledTurns` counts
@@ -91,6 +99,14 @@ export function createGame(map, opts = {}) {
     winner: null, // "Prisoner" | "Watcher"
     openedDoors: new Set(), // global door state (shared world)
     brokenWindows: new Set(), // global, permanent — a broken window stays broken
+    // Item tiles already collected, keyed y*size+x. A pickup is retired here
+    // the INSTANT it's taken (Brain lockstep#E5: never let a despawn
+    // animation gate further hits) — the renderer reads this to hide the
+    // prop, it is not what decides whether the pickup still exists.
+    takenItems: new Set(),
+    // Light groups killed for good by CUTTERS — a switch can no longer
+    // toggle these back on.
+    deadLightGroups: new Set(),
     lightState,
   };
 }
@@ -254,9 +270,15 @@ export function moveActivePrisoner(game, dir) {
     return { ok: true, event: "door-open", x: nx, y: ny };
   }
 
-  // Switch: toggle its light group, stays put, silent, costs 1 MP.
+  // Switch: toggle its light group, stays put, silent, costs 1 MP. A group
+  // cut by CUTTERS is dead for good and no longer responds.
   if (o === OBJ.SWITCH) {
     const g = game.map.lightGroup[ny][nx];
+    if (game.deadLightGroups.has(g)) {
+      p.mp -= 1;
+      logMsg(game, `The switch is dead — that circuit was cut.`);
+      return { ok: true, event: "switch-dead", group: g };
+    }
     game.lightState[g] = !game.lightState[g];
     p.mp -= 1;
     logMsg(game, `Prisoner flips a switch — lights ${game.lightState[g] ? "on" : "off"}.`);
@@ -272,6 +294,23 @@ export function moveActivePrisoner(game, dir) {
   p.mp -= 1;
 
   let event = "move";
+  let picked = null;
+
+  // Walked onto a pickup: take it if there's room. Retire the tile the
+  // instant it's taken, so a second prisoner stepping on the same square
+  // this turn can't collect a ghost copy.
+  if (o === OBJ.ITEM && !isItemTaken(game, nx, ny)) {
+    const entry = (game.map.items || []).find((it) => it.x === nx && it.y === ny);
+    if (entry && p.items.length < ITEM_CAP) {
+      game.takenItems.add(ny * game.map.size + nx);
+      p.items.push(entry.kind);
+      picked = entry.kind;
+      logMsg(game, `Prisoner picks up a ${ITEM_INFO[entry.kind].label}.`);
+      event = "item-pickup";
+    } else if (entry) {
+      logMsg(game, `Hands full — left the ${ITEM_INFO[entry.kind].label} behind.`);
+    }
+  }
 
   // Reached the exit?
   if (o === OBJ.EXIT) {
@@ -280,7 +319,109 @@ export function moveActivePrisoner(game, dir) {
     event = "exit";
   }
 
-  return { ok: true, event, x: nx, y: ny };
+  return { ok: true, event, x: nx, y: ny, picked };
+}
+
+export function isItemTaken(game, x, y) {
+  return game.takenItems.has(y * game.map.size + x);
+}
+
+// ---- Prisoner items ------------------------------------------------------
+
+// Use a carried item. `arg` is a direction index for the two that act on an
+// adjacent tile (LOCKPICK/CUTTERS), or an {x,y} target for DISTRACT.
+// Every item costs the item itself; only DISTRACT also costs MP, since it's
+// the one that acts at range rather than on something you already walked to.
+export function useItem(game, kind, arg) {
+  if (game.turn !== "Prisoner" || game.status !== "playing") {
+    return { ok: false, reason: "not-your-turn" };
+  }
+  const p = game.prisoners[game.activePrisoner];
+  if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
+  const slot = p.items.indexOf(kind);
+  if (slot === -1) return { ok: false, reason: "not-carried" };
+
+  const consume = () => p.items.splice(slot, 1);
+
+  if (kind === ITEM_KINDS.MUFFLE) {
+    if (p.muffled) return { ok: false, reason: "already-muffled" };
+    p.muffled = true;
+    consume();
+    logMsg(game, `Cloth wrapped — this turn's steps make no noise.`);
+    return { ok: true, event: "muffle" };
+  }
+
+  if (kind === ITEM_KINDS.DISTRACT) {
+    if (p.mp <= 0) return { ok: false, reason: "no-mp" };
+    // Accepts either an explicit {x,y} or a direction index — the direction
+    // form throws it as far down that line as the map allows, so the UI can
+    // reuse the same "arm, then press a direction" gesture as break-window
+    // instead of needing a separate tile-picker.
+    const target = typeof arg === "number" ? distractTarget(game, p, arg) : arg;
+    const tx = target && target.x;
+    const ty = target && target.y;
+    if (!Number.isInteger(tx) || !Number.isInteger(ty)) return { ok: false, reason: "no-target" };
+    if (tileAt(game, tx, ty) !== TILE.FLOOR) return { ok: false, reason: "bad-target" };
+    const d = Math.max(Math.abs(tx - p.x), Math.abs(ty - p.y));
+    if (d > DISTRACT_RANGE) return { ok: false, reason: "out-of-range" };
+    if (d < 2) return { ok: false, reason: "too-close" }; // a decoy at your feet isn't a decoy
+    p.mp -= 1;
+    consume();
+    // Real noise on the Watcher's board, but NOT self-noise — the whole
+    // point is that it points somewhere the prisoner isn't.
+    addNoise(game, tx, ty, "decoy");
+    logMsg(game, `A clatter rings out across the yard.`);
+    return { ok: true, event: "distract", x: tx, y: ty };
+  }
+
+  const { dx, dy } = DIR_VEC[arg] || {};
+  if (dx === undefined) return { ok: false, reason: "no-direction" };
+  const nx = p.x + dx;
+  const ny = p.y + dy;
+
+  if (kind === ITEM_KINDS.LOCKPICK) {
+    if (objAt(game, nx, ny) !== OBJ.DOOR) return { ok: false, reason: "no-door" };
+    if (isDoorOpen(game, nx, ny)) return { ok: false, reason: "already-open" };
+    game.openedDoors.add(ny * game.map.size + nx);
+    p.openedDoors.add(ny * game.map.size + nx);
+    consume();
+    logMsg(game, `Lockpick turns — the door swings open, free of charge.`);
+    return { ok: true, event: "lockpick", x: nx, y: ny };
+  }
+
+  if (kind === ITEM_KINDS.CUTTERS) {
+    if (objAt(game, nx, ny) !== OBJ.SWITCH) return { ok: false, reason: "no-switch" };
+    const g = game.map.lightGroup[ny][nx];
+    if (game.deadLightGroups.has(g)) return { ok: false, reason: "already-cut" };
+    game.deadLightGroups.add(g);
+    game.lightState[g] = false;
+    consume();
+    logMsg(game, `Wires snipped — that circuit is dark for good.`);
+    return { ok: true, event: "cutters", group: g, x: nx, y: ny };
+  }
+
+  return { ok: false, reason: "unknown-item" };
+}
+
+export const DISTRACT_RANGE = 6;
+
+// Furthest floor tile along `dir` within DISTRACT_RANGE that a thrown decoy
+// could plausibly land on — stops at the first sight-blocker, since you
+// can't lob it through a wall. Returns null if nothing valid is far enough
+// (the "too close" rule still applies at the call site).
+export function distractTarget(game, prisoner, dir) {
+  const { dx, dy } = DIR_VEC[dir] || {};
+  if (dx === undefined) return null;
+  let best = null;
+  let cx = prisoner.x;
+  let cy = prisoner.y;
+  for (let step = 1; step <= DISTRACT_RANGE; step++) {
+    cx += dx;
+    cy += dy;
+    if (blocksSight(game, cx, cy)) break;
+    if (tileAt(game, cx, cy) === TILE.FLOOR && step >= 2) best = { x: cx, y: cy };
+  }
+  return best;
 }
 
 // Break a window: a DELIBERATE alternate action, not automatic movement —
@@ -321,8 +462,11 @@ export function endPrisonerTurn(game) {
   const p = game.prisoners[game.activePrisoner];
   const dist =
     Math.abs(p.x - p.startTurnPos.x) + Math.abs(p.y - p.startTurnPos.y);
-  // Moving 2+ tiles this turn reveals the tile the prisoner STARTED on.
-  if (dist >= 2) {
+  // Moving 2+ tiles this turn reveals the tile the prisoner STARTED on —
+  // unless a MUFFLE was spent this turn, which is exactly what it buys.
+  if (dist >= 2 && p.muffled) {
+    logMsg(game, `Muffled — the steps leave no trace.`);
+  } else if (dist >= 2) {
     addNoise(game, p.startTurnPos.x, p.startTurnPos.y, "movement");
     pushSelfNoise(p, p.startTurnPos.x, p.startTurnPos.y);
     logMsg(game, `Movement noise heard near (${p.startTurnPos.x}, ${p.startTurnPos.y}).`);
@@ -419,6 +563,7 @@ export function endWatcherTurn(game) {
   p.mp = MP_PER_TURN;
   p.startTurnPos = { x: p.x, y: p.y };
   p.selfNoise = []; // "erased when the Watcher's turn begins" — gone by next turn
+  p.muffled = false; // one turn only
   game.turn = "Prisoner";
   game.round += 1;
   return { ok: true };

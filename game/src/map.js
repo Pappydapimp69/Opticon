@@ -23,6 +23,26 @@ export const OBJ = Object.freeze({
   SWITCH: 3, // toggles a linked light group; silent, costs 1 MP
   EXIT: 4, // reach it to win (prisoner)
   LIGHT: 5, // a lamp fixture; emits light when its group is on
+  ITEM: 6, // a one-use pickup lying on the floor; see ITEM_KINDS + map.items
+});
+
+// Prisoner pickups. Each is a small twist on a system that ALREADY exists
+// (noise / doors / lights) rather than a new mechanic — and each declares
+// what the map must actually contain for it to be usable, so a generator
+// that happened to roll zero doors never scatters lockpicks nobody can
+// spend (`requires: null` = always usable).
+export const ITEM_KINDS = Object.freeze({
+  DISTRACT: "distract", // fake a noise ping on a chosen tile — the prisoner's own bluff
+  MUFFLE: "muffle", // this turn's movement noise is suppressed
+  LOCKPICK: "lockpick", // open an adjacent door for free (normally costs 1 MP)
+  CUTTERS: "cutters", // at an adjacent switch: kill that light group permanently
+});
+
+export const ITEM_INFO = Object.freeze({
+  [ITEM_KINDS.DISTRACT]: { label: "Distraction", icon: "🔔", requires: null },
+  [ITEM_KINDS.MUFFLE]: { label: "Muffle", icon: "🧣", requires: null },
+  [ITEM_KINDS.LOCKPICK]: { label: "Lockpick", icon: "🗝️", requires: OBJ.DOOR },
+  [ITEM_KINDS.CUTTERS]: { label: "Cutters", icon: "✂️", requires: OBJ.SWITCH },
 });
 
 export const DIRS = Object.freeze(["North", "East", "South", "West"]);
@@ -53,6 +73,7 @@ export const MAP_DEFAULTS = Object.freeze({
   ringThickness: 3,
   border: 1, // outer bounding wall thickness
   prisonerCount: 1, // how many spawn points to place (map.spawns); map.spawn stays the primary one either way
+  itemCount: 5, // one-use prisoner pickups scattered on floor (map.items)
 });
 
 export function computeGridSize(cfg = MAP_DEFAULTS) {
@@ -146,6 +167,14 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
   // Repair connectivity: guarantee spawn can reach exit (flood fill; carve if needed).
   ensureConnected(tiles, objects, size, spawn, exit);
 
+  // --- Item pickups. Placed LAST, on purpose: an item's eligibility depends
+  // on what the generator actually produced (doors/switches are probabilistic
+  // — addBoundaryDoors rolls per slot, so a map CAN come out with zero), and
+  // ensureConnected may carve tiles that change the layout. Deciding the pool
+  // only once the world is final is what keeps a lockpick from ever spawning
+  // on a doorless map.
+  const items = placeItems(tiles, objects, ring, size, rng, cfg);
+
   return {
     seed,
     cfg,
@@ -158,6 +187,7 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
     lightGroup,
     lights, // [{x,y,group,radius}]
     lightState: lights.reduce((m, l) => ((m[l.group] = true), m), {}), // group -> on/off
+    items, // [{x,y,kind}] — one-use prisoner pickups; kinds are map-validated
     exit, // {x,y}
     spawn, // {x,y} — the primary spawn, unchanged shape for existing callers
     spawns, // [{x,y}, ...] — length === cfg.prisonerCount, spawns[0] === spawn
@@ -218,6 +248,39 @@ function placeWindows(tiles, objects, ring, size, rng, cfg) {
     if (!nsOpen && !ewOpen) continue;
     if (rng() < 0.35) objects[y][x] = OBJ.GLASS;
   }
+}
+
+// Scatter one-use pickups on plain floor. An item kind is only eligible if
+// the finished map actually contains the object it acts on — otherwise a
+// player picks up a lockpick on a doorless map and can never spend it, which
+// reads as a broken item rather than an unlucky seed. DISTRACT/MUFFLE have
+// no dependency (`requires: null`) so the pool is never empty.
+function placeItems(tiles, objects, ring, size, rng, cfg) {
+  const present = new Set();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) present.add(objects[y][x]);
+  }
+  const pool = Object.values(ITEM_KINDS).filter((k) => {
+    const req = ITEM_INFO[k].requires;
+    return req == null || present.has(req);
+  });
+  if (!pool.length) return [];
+
+  const items = [];
+  const want = cfg.itemCount == null ? 5 : cfg.itemCount;
+  let guard = size * size;
+  while (items.length < want && guard-- > 0) {
+    const x = 1 + Math.floor(rng() * (size - 2));
+    const y = 1 + Math.floor(rng() * (size - 2));
+    if (tiles[y][x] !== TILE.FLOOR) continue;
+    if (objects[y][x] !== OBJ.NONE) continue;
+    if (ring[y][x] === 0) continue;
+    if (items.some((it) => Math.max(Math.abs(it.x - x), Math.abs(it.y - y)) <= 2)) continue;
+    const kind = pool[Math.floor(rng() * pool.length) % pool.length];
+    objects[y][x] = OBJ.ITEM;
+    items.push({ x, y, kind });
+  }
+  return items;
 }
 
 function placeLightsAndSwitches(tiles, objects, ring, lightGroup, size, c, cfg, rng) {

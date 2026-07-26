@@ -1,7 +1,7 @@
 // main.js — Opticon 3D entry point. Wires map + rules + AI + render + input + UI
 // into a playable game: menu → play (single-player vs AI, or hotseat) → game over.
 
-import { generateMap, MAP_DEFAULTS, DIR_VEC, OBJ } from "./map.js";
+import { generateMap, MAP_DEFAULTS, DIR_VEC, OBJ, ITEM_KINDS, ITEM_INFO } from "./map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -16,6 +16,7 @@ import {
   isWalkable,
   isDoorOpen,
   isExposed,
+  useItem,
 } from "./rules.js";
 import { playWatcherTurn } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
@@ -24,7 +25,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.21.0";
+const BUILD = "beta-0.22.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -475,6 +476,7 @@ function startGame(overrides = {}) {
   app.game = createGame(map, { watcherFacing: 0, prisoners: map.spawns });
   app.game.prisoners.forEach((p) => (p.mpMax = 3));
   animatingPrisoner = 0;
+  armedItem = null;
 
   app.renderer.buildWorld(app.game);
   app.viewMode = app.config.humanRole === "Watcher" ? "watcher" : "prisoner";
@@ -626,6 +628,13 @@ function humanPrisonerIndex() {
 // changes), so it can never linger and silently reinterpret a later tap.
 let breakArmed = false;
 
+// Same "arm, then press a direction" gesture as breakArmed, for the two
+// items that act on an adjacent tile plus the thrown decoy. Holds the item
+// KIND (not a slot index) so a pickup landing mid-arm can't shift what the
+// next direction press spends. Cleared on use, on turn change, and whenever
+// breakArmed is armed — the two are mutually exclusive modes.
+let armedItem = null;
+
 // Which prisoner's avatar is (or was last) mid walk-animation — each
 // prisoner now has its own independent walk queue in the renderer, so
 // checking "is the walk finished" needs to know WHICH one, not just
@@ -640,8 +649,13 @@ function handlePrisonerIntent(intent, arg) {
   if (!humanControlsPrisoner()) return; // AI prisoner; ignore input
   if (intent === "toggleBreak") {
     breakArmed = !breakArmed;
+    if (breakArmed) armedItem = null; // mutually exclusive modes
     app.audio.play("ui");
     updateBreakToggleUI();
+    return;
+  }
+  if (intent === "item") {
+    armItemSlot(arg);
     return;
   }
   if (intent === "break") {
@@ -649,6 +663,13 @@ function handlePrisonerIntent(intent, arg) {
     return;
   }
   if (intent === "move") {
+    if (armedItem) {
+      const kind = armedItem;
+      armedItem = null;
+      updateItemBar();
+      doUseItem(kind, arg);
+      return;
+    }
     if (breakArmed) {
       breakArmed = false;
       updateBreakToggleUI();
@@ -687,6 +708,102 @@ function doBreakWindow(dir) {
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
+}
+
+// ---- Items ---------------------------------------------------------------
+
+// Arm the item in inventory slot `slot`. MUFFLE takes no direction, so it
+// resolves immediately rather than arming and waiting for a press that would
+// mean nothing.
+function armItemSlot(slot) {
+  const g = app.game;
+  if (!g || g.turn !== "Prisoner") return;
+  const p = g.prisoners[g.activePrisoner];
+  const kind = p && p.items[slot];
+  if (!kind) {
+    app.audio.play("blocked");
+    return;
+  }
+  if (kind === ITEM_KINDS.MUFFLE) {
+    doUseItem(kind, null);
+    return;
+  }
+  breakArmed = false;
+  updateBreakToggleUI();
+  armedItem = armedItem === kind ? null : kind;
+  app.audio.play("ui");
+  updateItemBar();
+  app.ui.hint(hintFor());
+}
+
+function doUseItem(kind, dirOrNull) {
+  const g = app.game;
+  if (!g || g.turn !== "Prisoner") return;
+  if (app.stagedPath.length) {
+    // Same rule as break-window: resolve or clear the staged path first, so
+    // an item never fires from a position the player only previewed.
+    app.audio.play("blocked");
+    return;
+  }
+  const r = useItem(g, kind, dirOrNull);
+  if (r.ok) {
+    if (r.event === "distract") {
+      app.audio.play("noise");
+      app.renderer.triggerPing(r.x, r.y);
+    } else if (r.event === "cutters") {
+      app.audio.play("switch");
+    } else {
+      app.audio.play("ui");
+    }
+  } else {
+    app.audio.play("blocked");
+  }
+  updateItemBar();
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+  app.ui.hint(hintFor());
+  updateCommitButton();
+}
+
+// Rebuild the on-screen inventory chips. Only ever shows the HUMAN's own
+// prisoner — a companion's belt is not the player's to see or spend.
+// Driven from loop() rather than from each of the many places inventory can
+// change (pickup on commit, use, turn handoff, new game) — the multi-handoff
+// audit problem that bit the 1→N prisoner scale-out (memory E10). The
+// signature guard makes a per-frame call free when nothing changed, so
+// there's no call site left to forget.
+let _itemBarSig = "";
+function updateItemBar() {
+  const bar = document.getElementById("itemBar");
+  if (!bar) return;
+  const g = app.game;
+  const show = g && g.turn === "Prisoner" && humanControlsPrisoner();
+  const p = show ? g.prisoners[g.activePrisoner] : null;
+  const sig = p ? `${p.items.join(",")}|${armedItem || ""}` : "";
+  if (sig === _itemBarSig) return;
+  _itemBarSig = sig;
+  if (!p || !p.items.length) {
+    bar.innerHTML = "";
+    bar.classList.add("empty");
+    return;
+  }
+  bar.classList.remove("empty");
+  bar.innerHTML = p.items
+    .map((kind, i) => {
+      const info = ITEM_INFO[kind];
+      const armed = armedItem === kind ? " armed" : "";
+      return `<button class="item-chip${armed}" data-intent="item" data-arg="${i}" title="${info.label}">` +
+        `<span class="ic">${info.icon}</span><span class="ik">${i + 1}</span></button>`;
+    })
+    .join("");
+  // The chips are rebuilt each time, so re-bind their taps to the same
+  // intent pipeline every other on-screen control uses.
+  bar.querySelectorAll("[data-intent]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      handleIntent("item", Number(btn.getAttribute("data-arg")));
+    });
+  });
 }
 
 // ---- Staged movement: nothing moves for real until the player commits ----
@@ -1009,11 +1126,13 @@ function loop(t) {
   pollIntroHold(t);
   pollStartHold(t);
   updateDangerVignette();
+  updateItemBar();
   // Safety net: a staged path (and an armed break) only make sense during
   // the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") {
     resetStagedPath();
     if (breakArmed) { breakArmed = false; updateBreakToggleUI(); }
+    if (armedItem) { armedItem = null; updateItemBar(); }
   }
   if (app.renderer && app.game) {
     const viewedPrisoner = app.game.prisoners[humanPrisonerIndex()];

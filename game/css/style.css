@@ -257,3 +257,33 @@ html, body {
   box-shadow: 0 0 22px rgba(90,212,230,0.45) !important; }
 .diff.gpfocus { border-color: var(--prisoner); }
 
+
+/* ---- Carried items (prisoner) ------------------------------------------- */
+.item-bar {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 150px; display: flex; gap: 10px; z-index: 6;
+  pointer-events: auto;
+}
+.item-bar.empty { display: none; }
+.item-chip {
+  position: relative; width: 54px; height: 54px; border-radius: 12px;
+  background: rgba(12, 17, 30, 0.82); border: 1px solid #2f3c5c;
+  color: #dce6ff; font: inherit; cursor: pointer; display: grid;
+  place-items: center; line-height: 1;
+  transition: border-color .12s, transform .12s, box-shadow .12s;
+}
+.item-chip .ic { font-size: 22px; }
+.item-chip .ik {
+  position: absolute; right: 5px; bottom: 3px;
+  font-size: 10px; opacity: .55;
+}
+.item-chip:hover { border-color: #4a5f8f; }
+.item-chip.armed {
+  border-color: #ffc75a; box-shadow: 0 0 12px rgba(255, 199, 90, .45);
+  transform: translateY(-3px);
+}
+@media (max-width: 720px) {
+  .item-bar { bottom: 210px; }
+  .item-chip { width: 46px; height: 46px; }
+  .item-chip .ic { font-size: 19px; }
+}
