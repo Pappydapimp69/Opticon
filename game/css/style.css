@@ -308,3 +308,14 @@ html, body {
 .roster .pip.down { color: #ff5f6d; opacity: .75; }
 .roster .pip.out { color: #59f7a6; }
 .roster .pip.act { text-shadow: 0 0 8px currentColor; transform: scale(1.18); }
+
+/* Item/skill name, always visible — a title= tooltip only ever reached the
+   one input scheme (mouse) that needed the help least. */
+.item-chip .iname {
+  position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: .02em; white-space: nowrap;
+  color: #93a4c8; pointer-events: none;
+}
+.item-chip.armed .iname, .item-chip.padsel .iname { color: #ffc75a; }
+.item-bar { padding-bottom: 18px; }
+@media (max-width: 720px) { .item-chip .iname { font-size: 9px; bottom: -15px; } }

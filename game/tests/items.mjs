@@ -152,6 +152,15 @@ function check(cond, label) {
     check(after.propHidden, "the 3D prop disappears once collected");
   }
 
+  // Item names must be VISIBLE, not tooltip-only: hover doesn't exist on
+  // touch and can't be reached by gamepad, so a title= attribute taught the
+  // name to the one scheme least likely to need it.
+  await page.evaluate(() => { window.__opticon.game.prisoners[0].items = ["muffle", "lockpick"]; });
+  await page.waitForTimeout(200);
+  const names = await page.$$eval("#itemBar .item-chip .iname", (els) => els.map((e) => e.textContent));
+  check(names.length === 2, `every chip renders a visible name (got ${names.length})`);
+  check(names.includes("Muffle") && names.includes("Lockpick"), `names are the real labels (got ${JSON.stringify(names)})`);
+
   // Crew roster: the replacement for the removed log as the way a player
   // learns a companion went down. Pips must track alive/caught/escaped.
   const roster = await page.evaluate(() => {

@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.31.0";
+const BUILD = "beta-0.32.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -827,8 +827,12 @@ function updateItemBar() {
     .map((kind, i) => {
       const info = ITEM_INFO[kind];
       const armed = (armedItem === kind ? " armed" : "") + (padSlot === i ? " padsel" : "");
+      // The name rides ON the chip, not in a title= tooltip. Hover doesn't
+      // exist on touch and can't be reached by gamepad, so a tooltip taught
+      // the item's name only to the one input scheme that needed it least.
       return `<button class="item-chip${armed}" data-intent="item" data-arg="${i}" title="${info.label}">` +
-        `<span class="ic">${info.icon}</span><span class="ik">${i + 1}</span></button>`;
+        `<span class="ic">${info.icon}</span><span class="ik">${i + 1}</span>` +
+        `<span class="iname">${info.label}</span></button>`;
     })
     .join("");
   // The chips are rebuilt each time, so re-bind their taps to the same
@@ -931,7 +935,8 @@ function updateSkillBar() {
       const cls = (e.cd > 0 ? " cooling" : e.usable ? "" : " unusable") + (padSlot === i ? " padsel" : "");
       const badge = e.cd > 0 ? `<span class="cd">${e.cd}</span>` : `<span class="ik">${i + 5}</span>`;
       return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${info.label}">` +
-        `<span class="ic">${info.icon}</span>${badge}</button>`;
+        `<span class="ic">${info.icon}</span>${badge}` +
+        `<span class="iname">${info.label}</span></button>`;
     })
     .join("");
   bar.querySelectorAll("[data-skill]").forEach((btn) => {
