@@ -2,6 +2,7 @@
 import { generateMap, computeGridSize, classifyRadius, TILE, OBJ, makeRng, MAP_DEFAULTS, ITEM_KINDS, ITEM_INFO } from "../src/map.js";
 import {
   createGame,
+  setBluff,
   moveActivePrisoner,
   breakWindow,
   endPrisonerTurn,
@@ -19,6 +20,13 @@ import {
   distractTarget,
   ITEM_CAP,
   isLit,
+  useSkill,
+  skillUsable,
+  skillReady,
+  inWatcherGazeWide,
+  SKILLS,
+  SKILL_INFO,
+  NOISE_TTL,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
@@ -700,6 +708,142 @@ section("items reject use when not carried");
   for (const kind of Object.values(ITEM_KINDS)) {
     const r = useItem(g, kind, 0);
     ok(!r.ok && r.reason === "not-carried", `${kind} can't be used without carrying it`);
+  }
+}
+
+
+// --- Watcher skills -------------------------------------------------------
+
+section("skills start ready and are never offered as a no-op");
+{
+  const g = createGame(generateMap(4));
+  for (const s of Object.values(SKILLS)) {
+    ok(skillReady(g, s), `${s} starts off cooldown`);
+  }
+  g.turn = "Watcher";
+  // LOCK with no open doors, ECHO with no noise, DOUBLE_BLUFF with no first
+  // bluff — all "ready" but not USABLE, and must refuse rather than burn.
+  ok(!skillUsable(g, SKILLS.LOCK), "lock is unusable with no open door");
+  ok(!skillUsable(g, SKILLS.ECHO), "echo is unusable with no noise");
+  ok(!skillUsable(g, SKILLS.DOUBLE_BLUFF), "double bluff is unusable with no first bluff");
+  ok(skillUsable(g, SKILLS.WIDE_SCAN), "wide scan is always usable");
+  const rl = useSkill(g, SKILLS.LOCK, null);
+  ok(!rl.ok, "using lock with no target refuses");
+  ok(skillReady(g, SKILLS.LOCK), "a refused skill does NOT go on cooldown");
+}
+
+section("wide scan widens the capture wedge for exactly one scan");
+{
+  const m = generateMap(6);
+  const g = createGame(m);
+  const c = m.center;
+  g.turn = "Watcher";
+  g.round = 5; // past the round-1 grace
+  g.watcher.facing = 0; // North
+  // A tile inside the 180 half-plane but OUTSIDE the 90 wedge.
+  ok(!inWatcherGaze(g, 0, c.x + 6, c.y - 1), "corner tile is outside the narrow wedge");
+  ok(inWatcherGazeWide(g, 0, c.x + 6, c.y - 1), "and inside the wide one");
+
+  const r = useSkill(g, SKILLS.WIDE_SCAN, null);
+  ok(r.ok, "wide scan arms");
+  ok(g.watcher.wideScan === true, "wideScan flag is set");
+  ok(!skillReady(g, SKILLS.WIDE_SCAN), "wide scan goes on cooldown");
+  const scan = watcherScan(g, "medium");
+  ok(scan.wide === true, "the scan reports it ran wide");
+  endWatcherTurn(g);
+  ok(g.watcher.wideScan === false, "wideScan clears after the turn");
+}
+
+section("wide scan costs the bluff (telegraphed power)");
+{
+  const g = createGame(generateMap(6));
+  g.turn = "Watcher";
+  setBluff(g, 2);
+  ok(g.watcher.bluff === 2, "bluff is set first");
+  useSkill(g, SKILLS.WIDE_SCAN, null);
+  ok(g.watcher.bluff === null, "arming a wide scan clears the bluff");
+}
+
+section("double bluff adds a SECOND claim, not a replacement");
+{
+  const g = createGame(generateMap(8));
+  g.turn = "Watcher";
+  g.watcher.facing = 0;
+  setBluff(g, 1);
+  const r = useSkill(g, SKILLS.DOUBLE_BLUFF, 2);
+  ok(r.ok, "double bluff applies");
+  ok(g.watcher.bluff === 1, "the first bluff survives");
+  ok(g.watcher.bluff2 === 2, "the second claim is recorded separately");
+  const rSame = useSkill(g, SKILLS.DOUBLE_BLUFF, 1);
+  ok(!rSame.ok, "can't double-bluff while on cooldown");
+  endWatcherTurn(g);
+  ok(g.watcher.bluff2 === null, "the second claim clears with the turn");
+}
+
+section("echo refreshes noise but stays secret from prisoners");
+{
+  const g = createGame(generateMap(10));
+  g.turn = "Watcher";
+  g.noise = [{ x: 3, y: 3, ttl: 1, source: "movement" }];
+  const r = useSkill(g, SKILLS.ECHO, null);
+  ok(r.ok, "echo applies when there's noise");
+  ok(g.noise[0].ttl === NOISE_TTL, "noise is refreshed to full TTL");
+  const entry = g.log[0];
+  ok(entry.watcherOnly === true, "the echo log entry is watcher-only (never leaks to the prisoner)");
+}
+
+section("remote lock closes an open door, but never on a prisoner");
+{
+  let done = false;
+  for (let seed = 1; seed <= 40 && !done; seed++) {
+    const m = generateMap(seed);
+    const g = createGame(m);
+    for (let y = 1; y < m.size - 1 && !done; y++) {
+      for (let x = 1; x < m.size - 1 && !done; x++) {
+        if (m.objects[y][x] !== OBJ.DOOR) continue;
+        g.openedDoors.add(y * m.size + x);
+        g.turn = "Watcher";
+        // Blocked while someone stands in the doorway.
+        const p = g.prisoners[0];
+        const keepX = p.x, keepY = p.y;
+        p.x = x; p.y = y;
+        const rBlocked = useSkill(g, SKILLS.LOCK, { x, y });
+        ok(!rBlocked.ok && rBlocked.reason === "occupied", `seed ${seed}: a door won't close on a prisoner`);
+        ok(skillReady(g, SKILLS.LOCK), "the blocked attempt didn't spend the cooldown");
+        // Now clear the doorway.
+        p.x = keepX; p.y = keepY;
+        const r = useSkill(g, SKILLS.LOCK, { x, y });
+        ok(r.ok, "lock closes an open door");
+        ok(!isDoorOpenTest(g, x, y), "the door is shut again");
+        ok(!skillReady(g, SKILLS.LOCK), "lock is now on cooldown");
+        done = true;
+      }
+    }
+  }
+  ok(done, "found a door to test remote lock against");
+}
+
+section("cooldowns tick down once per watcher turn and then re-arm");
+{
+  const g = createGame(generateMap(12));
+  g.turn = "Watcher";
+  useSkill(g, SKILLS.WIDE_SCAN, null);
+  const cd = SKILL_INFO[SKILLS.WIDE_SCAN].cooldown;
+  ok(g.watcher.skills[SKILLS.WIDE_SCAN] === cd, `cooldown set to ${cd}`);
+  for (let i = 0; i < cd; i++) {
+    endWatcherTurn(g);
+    g.turn = "Watcher";
+  }
+  ok(skillReady(g, SKILLS.WIDE_SCAN), "skill is ready again after its cooldown elapses");
+}
+
+section("skills refuse outside the watcher's turn");
+{
+  const g = createGame(generateMap(13));
+  g.turn = "Prisoner";
+  for (const s of Object.values(SKILLS)) {
+    const r = useSkill(g, s, 0);
+    ok(!r.ok && r.reason === "not-your-turn", `${s} refuses on the prisoner's turn`);
   }
 }
 

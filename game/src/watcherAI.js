@@ -16,13 +16,17 @@ import {
   endWatcherTurn,
   inWatcherGaze,
   isOver,
+  useSkill,
+  skillUsable,
+  objAt,
+  SKILLS,
 } from "./rules.js";
 import { makeRng } from "./map.js";
 
 export const DIFFICULTY = Object.freeze({
-  easy: { bluffChance: 0.15, exitBias: 0.2, noiseWeight: 1.0, memory: 1 },
-  medium: { bluffChance: 0.4, exitBias: 0.5, noiseWeight: 1.5, memory: 2 },
-  hard: { bluffChance: 0.7, exitBias: 0.9, noiseWeight: 2.0, memory: 3 },
+  easy: { bluffChance: 0.15, exitBias: 0.2, noiseWeight: 1.0, memory: 1, skillUse: 0.1 },
+  medium: { bluffChance: 0.4, exitBias: 0.5, noiseWeight: 1.5, memory: 2, skillUse: 0.35 },
+  hard: { bluffChance: 0.7, exitBias: 0.9, noiseWeight: 2.0, memory: 3, skillUse: 0.7 },
 });
 
 // Blend this turn's raw scores into game.watcher.suspicion so a harder AI
@@ -124,6 +128,25 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
     }
   }
 
+  // Skills, before committing the scan. Gated by `skillUse` so difficulty is
+  // a real lever here too (easy barely uses them; hard leans on them), and
+  // every use goes through skillUsable() so the AI never burns a cooldown on
+  // a no-op — the same "don't offer a dead action" rule the item placement
+  // follows on the prisoner side.
+  for (const s of pickSkills(game, tuning, rng)) {
+    let arg = null;
+    if (s === SKILLS.DOUBLE_BLUFF) {
+      // A second claim, different from both the truth and the first bluff.
+      for (let d = 0; d < 4; d++) {
+        if (d !== game.watcher.facing && d !== game.watcher.bluff) { arg = d; break; }
+      }
+    } else if (s === SKILLS.LOCK) {
+      arg = firstOpenDoor(game);
+    }
+    const r = useSkill(game, s, arg);
+    if (r.ok) actions.push({ type: "skill", skill: s });
+  }
+
   // Commit the scan (captures an exposed prisoner in the true wedge).
   const scan = watcherScan(game, difficulty);
   actions.push({ type: "scan", caught: scan.caught ? scan.caught.id : null });
@@ -134,4 +157,28 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1) {
   return actions;
 }
 
-export { scoreDirections, blendSuspicion };
+// Which skills to spend this turn. At most ONE per turn — a Watcher that
+// dumped every ready cooldown at once would be swingy rather than
+// threatening, and the cooldowns are meant to be a pacing device.
+function pickSkills(game, tuning, rng) {
+  if (rng() >= (tuning.skillUse ?? 0.35)) return [];
+  // Preference order reflects value: catching someone beats setting up.
+  const order = [SKILLS.WIDE_SCAN, SKILLS.ECHO, SKILLS.DOUBLE_BLUFF, SKILLS.LOCK];
+  for (const s of order) {
+    if (skillUsable(game, s)) return [s];
+  }
+  return [];
+}
+
+function firstOpenDoor(game) {
+  for (const key of game.openedDoors) {
+    const x = key % game.map.size;
+    const y = Math.floor(key / game.map.size);
+    if (objAt(game, x, y) !== 1 /* OBJ.DOOR */) continue;
+    if (game.prisoners.some((p) => p.alive && !p.escaped && p.x === x && p.y === y)) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+export { scoreDirections, blendSuspicion, pickSkills };

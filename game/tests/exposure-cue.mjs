@@ -68,7 +68,17 @@ function check(cond, label) {
     const a = window.__opticon;
     const g = a.game;
     const p = g.prisoners[g.activePrisoner];
-    const light = g.map.lights.find((l) => g.lightState[l.group]);
+    // createGame() switches OFF every light group near a spawn so the opening
+    // moves happen in shadow. With a 3-prisoner group that can cover EVERY
+    // group on some seeds, leaving nothing lit to test against (a rare flake
+    // on the random per-run seed). Turn one back on explicitly rather than
+    // retrying seeds — the vignette rule under test doesn't care WHY a tile
+    // is lit, only that it is.
+    let light = g.map.lights.find((l) => g.lightState[l.group]);
+    if (!light && g.map.lights.length) {
+      light = g.map.lights[0];
+      g.lightState[light.group] = true;
+    }
     if (!light) return { found: false };
     p.x = light.x; p.y = light.y;
     return { found: true };

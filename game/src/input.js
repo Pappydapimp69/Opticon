@@ -101,6 +101,12 @@ export class Input {
       Digit1: () => { this.onIntent("item", 0); this.onIntent("bluff", 0); },
       Digit2: () => { this.onIntent("item", 1); this.onIntent("bluff", 1); },
       Digit3: () => this.onIntent("bluff", 2), Digit4: () => this.onIntent("bluff", 3),
+      // 5-8: Watcher skills. Prisoner-turn presses are ignored by
+      // handlePrisonerIntent, same one-role-per-turn split as 1-4 above.
+      Digit5: () => this.onIntent("skill", "doubleBluff"),
+      Digit6: () => this.onIntent("skill", "wideScan"),
+      Digit7: () => this.onIntent("skill", "echo"),
+      Digit8: () => this.onIntent("skill", "lock"),
       Tab: () => this.onIntent("cycleView"), KeyV: () => this.onIntent("cycleView"),
       KeyR: () => this.onIntent("restart"),
     };

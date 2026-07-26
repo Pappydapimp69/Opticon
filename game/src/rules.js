@@ -17,6 +17,24 @@ import { TILE, OBJ, DIRS, DIR_VEC, ITEM_KINDS, ITEM_INFO } from "./map.js";
 
 export const MP_PER_TURN = 3;
 export const ITEM_CAP = 2; // carried at once — forces a real "which do I keep" choice
+
+// Watcher skills. Unlike prisoner items (found, one-use), these are always
+// available but rate-limited by a cooldown — the Watcher is a fixed
+// institution, not a scavenger, so its power is about WHEN to spend an
+// action, not whether it happens to have found one.
+export const SKILLS = Object.freeze({
+  DOUBLE_BLUFF: "doubleBluff", // claim a SECOND direction this turn
+  WIDE_SCAN: "wideScan", // this scan sweeps 180 deg instead of 90
+  ECHO: "echo", // refresh every current noise marker to full TTL
+  LOCK: "lock", // slam an open door shut from the tower
+});
+
+export const SKILL_INFO = Object.freeze({
+  [SKILLS.DOUBLE_BLUFF]: { label: "Double bluff", icon: "🎭", cooldown: 3 },
+  [SKILLS.WIDE_SCAN]: { label: "Wide scan", icon: "🔦", cooldown: 4 },
+  [SKILLS.ECHO]: { label: "Echo memory", icon: "📡", cooldown: 3 },
+  [SKILLS.LOCK]: { label: "Remote lock", icon: "🔒", cooldown: 4 },
+});
 export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher
 export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)
 
@@ -89,6 +107,14 @@ export function createGame(map, opts = {}) {
       // `noise` (see watcherAI.js DIFFICULTY.memory). Unused for a
       // human-controlled Watcher.
       suspicion: [0, 0, 0, 0],
+      // A second claimed direction, unlocked by the DOUBLE_BLUFF skill. Like
+      // `bluff` this is a public claim, not the truth.
+      bluff2: null,
+      // Set for exactly one scan by WIDE_SCAN — widens the capture wedge from
+      // 90 to 180 degrees for that scan only.
+      wideScan: false,
+      // Turns remaining before each skill is usable again; 0 === ready.
+      skills: Object.keys(SKILL_INFO).reduce((m, k) => ((m[k] = 0), m), {}),
     },
     // Which side has the initiative this turn.
     turn: "Prisoner", // "Prisoner" | "Watcher"
@@ -487,6 +513,105 @@ export function rotateWatcher(game, delta) {
   return { ok: true };
 }
 
+// The 180-degree half-plane version, used only for a WIDE_SCAN turn. Kept
+// as its own function rather than a flag inside inWatcherGaze so every
+// existing caller (FoV rendering, the AI's own reasoning) keeps the normal
+// 90-degree meaning unless a scan explicitly asks for the wide one.
+export function inWatcherGazeWide(game, dir, x, y) {
+  const { center } = game.map;
+  const dx = x - center.x;
+  const dy = y - center.y;
+  switch (dir) {
+    case 0: return dy < 0; // North half-plane
+    case 1: return dx > 0; // East
+    case 2: return dy > 0; // South
+    case 3: return dx < 0; // West
+    default: return false;
+  }
+}
+
+export function skillReady(game, skill) {
+  return (game.watcher.skills[skill] || 0) === 0;
+}
+
+// Can this skill do anything RIGHT NOW? Cooldown aside, LOCK needs an
+// actually-open door to slam, and ECHO needs noise to refresh — same
+// principle as the items' map validation: never offer an action that
+// silently no-ops.
+export function skillUsable(game, skill) {
+  if (!skillReady(game, skill)) return false;
+  if (skill === SKILLS.LOCK) return game.openedDoors.size > 0;
+  if (skill === SKILLS.ECHO) return game.noise.length > 0;
+  if (skill === SKILLS.DOUBLE_BLUFF) return game.watcher.bluff != null;
+  return true;
+}
+
+export function useSkill(game, skill, arg) {
+  if (game.turn !== "Watcher" || game.status !== "playing") {
+    return { ok: false, reason: "not-your-turn" };
+  }
+  if (!SKILL_INFO[skill]) return { ok: false, reason: "unknown-skill" };
+  if (!skillReady(game, skill)) return { ok: false, reason: "cooling-down" };
+
+  const spend = () => (game.watcher.skills[skill] = SKILL_INFO[skill].cooldown);
+
+  if (skill === SKILLS.DOUBLE_BLUFF) {
+    // Needs a first bluff to be a SECOND one — otherwise it's just setBluff.
+    if (game.watcher.bluff == null) return { ok: false, reason: "no-first-bluff" };
+    const dir = arg;
+    if (!DIR_VEC[dir]) return { ok: false, reason: "no-direction" };
+    if (dir === game.watcher.bluff) return { ok: false, reason: "same-direction" };
+    game.watcher.bluff2 = dir;
+    spend();
+    logMsg(game, `Watcher also declares eyes on ${DIRS[dir]}...`);
+    return { ok: true, event: "double-bluff", dir };
+  }
+
+  if (skill === SKILLS.WIDE_SCAN) {
+    if (game.watcher.wideScan) return { ok: false, reason: "already-armed" };
+    game.watcher.wideScan = true;
+    // A sweep this broad can't be disguised — it costs you the whole bluff,
+    // which is the tradeoff: raw coverage in exchange for misdirection.
+    game.watcher.bluff = null;
+    game.watcher.bluff2 = null;
+    spend();
+    logMsg(game, `The tower light widens — a full sweep is coming.`);
+    return { ok: true, event: "wide-scan" };
+  }
+
+  if (skill === SKILLS.ECHO) {
+    if (!game.noise.length) return { ok: false, reason: "no-noise" };
+    for (const n of game.noise) n.ttl = NOISE_TTL;
+    spend();
+    // Watcher-only: the prisoners must not learn that stale intel just got
+    // refreshed — that's precisely the information the skill buys.
+    logMsg(game, `Echo memory — every trace is fresh again.`, { watcherOnly: true });
+    return { ok: true, event: "echo", refreshed: game.noise.length };
+  }
+
+  if (skill === SKILLS.LOCK) {
+    // arg is {x,y} of an open door.
+    const x = arg && arg.x;
+    const y = arg && arg.y;
+    if (!Number.isInteger(x) || !Number.isInteger(y)) return { ok: false, reason: "no-target" };
+    if (objAt(game, x, y) !== OBJ.DOOR) return { ok: false, reason: "no-door" };
+    if (!isDoorOpen(game, x, y)) return { ok: false, reason: "not-open" };
+    // A prisoner standing IN the doorway can't be crushed shut — the door
+    // simply won't close on an occupied tile.
+    if (game.prisoners.some((p) => p.alive && !p.escaped && p.x === x && p.y === y)) {
+      return { ok: false, reason: "occupied" };
+    }
+    game.openedDoors.delete(y * game.map.size + x);
+    for (const p of game.prisoners) p.openedDoors.delete(y * game.map.size + x);
+    spend();
+    // A door slamming is loud and physical — everyone hears this one.
+    logMsg(game, `A door slams shut somewhere in the yard.`);
+    return { ok: true, event: "lock", x, y };
+  }
+
+  return { ok: false, reason: "unknown-skill" };
+}
+
 export function setBluff(game, dir) {
   if (game.turn !== "Watcher" || game.status !== "playing") return { ok: false };
   game.watcher.bluff = dir;
@@ -528,10 +653,12 @@ export function watcherScan(game, difficulty = "medium") {
     return { ok: true, caught: null, grace: true };
   }
   const dir = game.watcher.facing;
+  const wide = !!game.watcher.wideScan;
+  const inGaze = wide ? inWatcherGazeWide : inWatcherGaze;
   let caught = null;
   for (const p of game.prisoners) {
     if (!p.alive || p.escaped) continue;
-    if (!inWatcherGaze(game, dir, p.x, p.y)) continue;
+    if (!inGaze(game, dir, p.x, p.y)) continue;
     if (isExposed(game, p.x, p.y, difficulty)) {
       p.alive = false;
       caught = p;
@@ -540,7 +667,7 @@ export function watcherScan(game, difficulty = "medium") {
     }
   }
   checkEndConditions(game);
-  return { ok: true, caught };
+  return { ok: true, caught, wide };
 }
 
 // End the Watcher's turn: age noise, refresh prisoner MP, hand back initiative.
@@ -551,6 +678,12 @@ export function endWatcherTurn(game) {
     .map((n) => ({ ...n, ttl: n.ttl - 1 }))
     .filter((n) => n.ttl > 0);
   game.watcher.bluff = null;
+  game.watcher.bluff2 = null;
+  game.watcher.wideScan = false; // armed for exactly one scan
+  // Tick every skill cooldown down one Watcher turn.
+  for (const k of Object.keys(game.watcher.skills)) {
+    if (game.watcher.skills[k] > 0) game.watcher.skills[k] -= 1;
+  }
 
   // Advance to next living, un-escaped prisoner.
   const next = nextActivePrisoner(game);
