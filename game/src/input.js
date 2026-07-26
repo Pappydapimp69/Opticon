@@ -46,6 +46,11 @@ export class Input {
   }
 
   _handleKey(e) {
+    // Function keys (F1-F12, incl. F11 fullscreen) are never game controls —
+    // let the browser handle them natively in every mode, rather than
+    // swallowing the event via a mode branch's blanket preventDefault()
+    // below (intro/pass previously ate every key unconditionally).
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.code)) return;
     // Intro: requires a HOLD (Space), read directly via isHeld() and polled
     // in main.js's loop() — a single keydown must not dismiss it, so this
     // just swallows the event without dispatching anything.
