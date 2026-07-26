@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.24.0";
+const BUILD = "beta-0.25.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -552,28 +552,32 @@ function hintFor() {
   const scheme = app.input ? app.input.activeScheme : "keyboard";
   const prisoner = g.turn === "Prisoner";
   const staged = app.stagedPath.length > 0;
+  // Only advertise item controls when something is actually carried —
+  // otherwise the hint teaches a verb the player has no way to perform yet.
+  const carrying = prisoner && humanControlsPrisoner() &&
+    !!(g.prisoners[g.activePrisoner] || {}).items?.length;
   if (scheme === "gamepad") {
     if (prisoner) {
       return staged
         ? "Stick / D-pad: extend or undo the path  ·  A: commit the move  ·  Start: change view"
-        : "Left stick / D-pad: plan a path (traced, not moved yet)  ·  A: end turn  ·  Hold RB + direction: break a window  ·  Start: change view";
+        : "Left stick / D-pad: plan a path  ·  A: end turn  ·  Hold RB + direction: break a window" + (carrying ? "  ·  LT: pick item, RT: use" : "") + "  ·  Start: change view";
     }
-    return "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  A: scan & end turn  ·  Start: change view";
+    return "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  LT: pick skill, RT: use  ·  A: scan & end turn  ·  Start: change view";
   }
   if (scheme === "touch") {
     if (prisoner) {
       return staged
         ? "Tap arrows to extend/undo the path  ·  Commit: move for real  ·  View: change camera"
-        : "Tap arrows to plan a path (traced, not moved yet)  ·  💥: arm a window break, then tap a direction  ·  End: end turn  ·  View: change camera";
+        : "Tap arrows to plan a path  ·  💥: arm a window break, then tap a direction" + (carrying ? "  ·  tap an item, then a direction" : "") + "  ·  End: end turn  ·  View: change camera";
     }
-    return "Rotate / bluff with the buttons  ·  Scan: end turn  ·  View: change camera";
+    return "Rotate / bluff with the buttons  ·  tap a skill to use it  ·  Scan: end turn  ·  View: change camera";
   }
   if (prisoner) {
     return staged
       ? "WASD / arrows: extend or undo the path  ·  Space: commit the move  ·  V: view"
-      : "WASD / arrows: plan a path (traced on the floor, not moved yet)  ·  Shift + direction: break a window  ·  Space: end turn  ·  V: view  ·  reach the green gate";
+      : "WASD / arrows: plan a path  ·  Shift + direction: break a window" + (carrying ? "  ·  1-2: use an item" : "") + "  ·  Space: end turn  ·  V: view  ·  reach the green gate";
   }
-  return "Q / E: rotate 90°  ·  1-4: bluff a direction  ·  Space: scan & end turn  ·  V: view";
+  return "Q / E: rotate 90°  ·  1-4: bluff  ·  5-8: skills  ·  Space: scan & end turn  ·  V: view";
 }
 
 // ---- Intent handling -----------------------------------------------------
