@@ -11,6 +11,7 @@ export class UI {
       hud: document.getElementById("hud"),
       turn: document.getElementById("turnLabel"),
       role: document.getElementById("roleLabel"),
+      roster: document.getElementById("rosterLabel"),
       facing: document.getElementById("facingLabel"),
       mp: document.getElementById("mpLabel"),
       round: document.getElementById("roundLabel"),
@@ -61,6 +62,7 @@ export class UI {
     this.el.round.classList.toggle("urgent", left <= 10);
     this.el.view.textContent = viewMode;
     this.el.role.textContent = humanRole;
+    this.renderRoster(game);
 
     const prisonerTurn = game.turn === "Prisoner";
     this.el.prisonerControls.classList.toggle("active", prisonerTurn);
@@ -80,6 +82,29 @@ export class UI {
   // `watcherOnly` filtering below is the leak guard), it just isn't drawn.
   renderLog(game, showWatcherInfo) {
     return game.log.filter((l) => !l.watcherOnly || showWatcherInfo);
+  }
+
+  // One pip per prisoner: filled = still running, struck = caught, ringed =
+  // already out through the gate. Replaces the removed log as the way you
+  // learn a companion went down. Hidden entirely for a lone prisoner, where
+  // it would just restate the Move stat.
+  renderRoster(game) {
+    const el = this.el.roster;
+    if (!el) return;
+    if (game.prisoners.length < 2) {
+      el.textContent = "";
+      el.parentElement.classList.add("hidden");
+      return;
+    }
+    el.parentElement.classList.remove("hidden");
+    el.innerHTML = game.prisoners
+      .map((p, i) => {
+        const state = p.escaped ? "out" : !p.alive ? "down" : "run";
+        const active = game.turn === "Prisoner" && game.activePrisoner === i ? " act" : "";
+        const glyph = p.escaped ? "◎" : !p.alive ? "✕" : "●";
+        return `<span class="pip ${state}${active}" title="Prisoner ${i + 1}">${glyph}</span>`;
+      })
+      .join("");
   }
 
   banner(text, cls = "") {

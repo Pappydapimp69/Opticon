@@ -126,6 +126,33 @@ export class Audio {
         break;
       case "turn": this.tone(440, 0.06, "sine", 0.045); break;
       case "ui": this.tone(660, 0.04, "sine", 0.035); break;
+      // Distinct voices for the item/skill verbs. They previously all
+      // reused "ui", so spending a one-use item sounded exactly like moving
+      // a menu cursor — no weight, and no way to tell by ear that something
+      // irreversible just happened.
+      case "pickup": // rising two-note chime: you gained something
+        this.tone(620, 0.06, "triangle", 0.05);
+        setTimeout(() => this.tone(880, 0.09, "triangle", 0.05), 60);
+        break;
+      case "item": // a spent consumable: soft, downward, final
+        this.tone(540, 0.07, "sine", 0.05);
+        setTimeout(() => this.tone(400, 0.12, "sine", 0.045), 55);
+        break;
+      case "muffle": // dampened thud — the sound of sound going away
+        this.tone(180, 0.16, "sine", 0.05);
+        break;
+      case "cutters": // two snips
+        this.tone(900, 0.03, "square", 0.045);
+        setTimeout(() => this.tone(760, 0.04, "square", 0.045), 70);
+        break;
+      case "skill": // the tower spending a charge: colder, metallic
+        this.tone(300, 0.05, "sawtooth", 0.045);
+        setTimeout(() => this.tone(450, 0.1, "sawtooth", 0.04), 50);
+        break;
+      case "lock": // a door slamming from a distance
+        this.tone(150, 0.12, "square", 0.07);
+        setTimeout(() => this.tone(90, 0.16, "square", 0.05), 60);
+        break;
       case "start":
         this.tone(196, 0.5, "sine", 0.09);
         this.tone(294, 0.4, "triangle", 0.06, 0.06);

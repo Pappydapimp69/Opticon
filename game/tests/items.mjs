@@ -152,6 +152,26 @@ function check(cond, label) {
     check(after.propHidden, "the 3D prop disappears once collected");
   }
 
+  // Crew roster: the replacement for the removed log as the way a player
+  // learns a companion went down. Pips must track alive/caught/escaped.
+  const roster = await page.evaluate(() => {
+    const g = window.__opticon.game;
+    g.prisoners[1].alive = false;   // caught
+    g.prisoners[2].escaped = true;  // out
+    window.__opticon.ui.updateHud(g, "prisoner", "Prisoner", false);
+    const el = document.getElementById("rosterLabel");
+    return {
+      pips: el.querySelectorAll(".pip").length,
+      down: el.querySelectorAll(".pip.down").length,
+      out: el.querySelectorAll(".pip.out").length,
+      run: el.querySelectorAll(".pip.run").length,
+    };
+  });
+  check(roster.pips === 3, `roster shows one pip per prisoner (got ${roster.pips})`);
+  check(roster.down === 1, "a captured companion renders as down");
+  check(roster.out === 1, "an escaped companion renders as out");
+  check(roster.run === 1, "the remaining prisoner still renders as running");
+
   check(errors.length === 0, `no console errors (${errors.length} found)`);
   errors.slice(0, 10).forEach((e) => console.log("    •", e));
 
