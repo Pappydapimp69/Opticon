@@ -1,3 +1,12 @@
+// PAD_SLOT_COUNT — the range LT/RT cycle over for both item slots
+// (Prisoner, max ITEM_CAP=2) and skill slots (Watcher, one per SKILLS
+// entry). Must be >= SKILLS' count in rules.js, or a skill past this range
+// is simply unreachable via gamepad — this bit Dispatch specifically: the
+// cursor used to wrap at 4 while SKILLS had grown to 5 entries, so no
+// amount of LT presses could ever land on it. Cycling past an item's own
+// (smaller) count is harmless — armItemSlot() no-ops on an empty slot.
+const PAD_SLOT_COUNT = 5;
+
 // input.js — Unified input: keyboard, on-screen touch buttons, gamepad.
 // All dispatch is by `mode` ('intro' | 'menu' | 'game') so the same devices
 // drive whichever screen is up. Tracks the active scheme so the UI can show
@@ -220,17 +229,23 @@ export class Input {
     // uses never actually conflict in practice — only one role's intents
     // are recognized per turn, see handlePrisonerIntent/handleWatcherIntent).
     const breakMod = pressed[5];
-    if (edge(12)) this.onIntent(breakMod ? "break" : "move", 0);
-    if (edge(15)) this.onIntent(breakMod ? "break" : "move", 1);
-    if (edge(13)) this.onIntent(breakMod ? "break" : "move", 2);
-    if (edge(14)) this.onIntent(breakMod ? "break" : "move", 3);
-    if (stickDir != null) this.onIntent(breakMod ? "break" : "move", stickDir);
+    // D-pad also dual-dispatches "bluff" with the SAME direction index, same
+    // one-role-per-turn convention as keyboard 1/2 (item + bluff): only one
+    // role's handler is listening per turn, so this never conflicts. Added
+    // because the face buttons below can only reach 3 of 4 directions (Y/B/X
+    // — A is taken by endTurn), so South had NO gamepad route at all for
+    // bluff or DISPATCH's quadrant pick until now.
+    if (edge(12)) { this.onIntent(breakMod ? "break" : "move", 0); this.onIntent("bluff", 0); }
+    if (edge(15)) { this.onIntent(breakMod ? "break" : "move", 1); this.onIntent("bluff", 1); }
+    if (edge(13)) { this.onIntent(breakMod ? "break" : "move", 2); this.onIntent("bluff", 2); }
+    if (edge(14)) { this.onIntent(breakMod ? "break" : "move", 3); this.onIntent("bluff", 3); }
+    if (stickDir != null) { this.onIntent(breakMod ? "break" : "move", stickDir); this.onIntent("bluff", stickDir); }
     if (edge(0)) this.onIntent("endTurn");   // A
     if (edge(4)) this.onIntent("rotate", -1); // LB
     if (edge(5)) this.onIntent("rotate", 1);  // RB
-    if (edge(3)) this.onIntent("bluff", 0);   // Y
-    if (edge(1)) this.onIntent("bluff", 1);   // B
-    if (edge(2)) this.onIntent("bluff", 3);   // X
+    if (edge(3)) this.onIntent("bluff", 0);   // Y (kept for muscle memory)
+    if (edge(1)) this.onIntent("bluff", 1);   // B (kept for muscle memory)
+    if (edge(2)) this.onIntent("bluff", 3);   // X (kept for muscle memory)
     if (edge(9)) this.onIntent("cycleView");  // Start
     // Items + skills had NO gamepad route at all — they were keyboard
     // (1-8) and touch-chip only, so a pad player simply could not use half
@@ -240,7 +255,7 @@ export class Input {
     // indexes into is decided by whose turn it is, the same one-role-per-
     // turn split every other shared binding here relies on.
     if (edge(6)) {
-      this.slotCursor = (this.slotCursor + 1) % 4;
+      this.slotCursor = (this.slotCursor + 1) % PAD_SLOT_COUNT;
       this.onIntent("slotCursor", this.slotCursor);
     }
     if (edge(7)) this.onIntent("useSlot", this.slotCursor);
