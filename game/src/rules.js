@@ -658,11 +658,40 @@ function quadrantOf(game, x, y) {
   return dx > 0 ? 1 : 3;
 }
 
+// How far a guard can actually SEE, not just walk to. Deliberately much
+// shorter than the map — a guard is a physical patroller, not the tower;
+// its threat is "don't let one round a corner near you", not omniscience.
+export const GUARD_SIGHT_RANGE = 5;
+
+// Any-angle line of sight between two tiles, capped at `maxRange` — this is
+// the guards' capture condition instead of the tower's lit-OR-noise
+// abstraction: a physical squad just needs an unobstructed look at you, so
+// cover (the same walls/closed doors that block computeFoV) is a real
+// counter-play against them, distinct from evading the tower's gaze angle.
+// Samples the straight line at unit steps and rounds to the nearest tile —
+// an approximation (like the rest of this game's grid-based sight checks),
+// not a rigorous supercover raycast, but sufficient at this map's scale.
+export function hasLineOfSight(game, ax, ay, bx, by, maxRange = GUARD_SIGHT_RANGE) {
+  const dist = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+  if (dist > maxRange) return false;
+  if (dist === 0) return true;
+  const dx = bx - ax, dy = by - ay;
+  for (let i = 1; i < dist; i++) {
+    const t = i / dist;
+    const cx = Math.round(ax + dx * t);
+    const cy = Math.round(ay + dy * t);
+    if (cx === bx && cy === by) continue; // reached target early via rounding
+    if (blocksSight(game, cx, cy)) return false;
+  }
+  return true;
+}
+
 // Advance every dispatched guard one round: chase the freshest noise inside
-// its assigned quadrant at GUARD_SPEED tiles/turn, capture on same-tile
-// contact with a live prisoner, and recall guards whose life ran out without
-// finding anyone (the DISPATCH skill's "miss" cost is the spent cooldown,
-// nothing more — a whiff doesn't strand a permanent hazard on the map).
+// its assigned quadrant at GUARD_SPEED tiles/turn, capture any live prisoner
+// within sight (line-of-sight + range, not just same-tile contact), and
+// recall guards whose life ran out without finding anyone (the DISPATCH
+// skill's "miss" cost is the spent cooldown, nothing more — a whiff doesn't
+// strand a permanent hazard on the map).
 export function moveGuards(game) {
   const w = game.watcher;
   for (const guard of w.guards) {
@@ -682,7 +711,7 @@ export function moveGuards(game) {
     }
     for (const p of game.prisoners) {
       if (!p.alive || p.escaped) continue;
-      if (p.x === guard.x && p.y === guard.y) {
+      if (hasLineOfSight(game, guard.x, guard.y, p.x, p.y)) {
         p.alive = false;
         logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
       }

@@ -29,6 +29,9 @@ import {
   NOISE_TTL,
   isOver,
   ROUND_LIMIT,
+  hasLineOfSight,
+  moveGuards,
+  GUARD_SIGHT_RANGE,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
@@ -913,6 +916,57 @@ section("an escape still beats the clock");
   ok(!g.timedOut, "and it is not recorded as a timeout");
 }
 
+
+// --- Guard line-of-sight capture -------------------------------------------
+// Physical guards (DISPATCH skill) capture on an unobstructed sightline, not
+// same-tile contact — cover should be a real counter-play against them,
+// distinct from evading the tower's abstract lit-OR-noise gaze rule.
+
+function clearStrip(g, y, x0, x1) {
+  for (let x = x0; x <= x1; x++) {
+    g.map.tiles[y][x] = TILE.FLOOR;
+    g.map.objects[y][x] = OBJ.NONE;
+  }
+}
+
+section("guard line of sight");
+{
+  const g = createGame(generateMap(31));
+  const { y } = g.map.center;
+  const cx = g.map.center.x;
+  clearStrip(g, y, cx - 4, cx + 4);
+  ok(hasLineOfSight(g, cx - 3, y, cx, y), "clear straight line within range sees the target");
+  ok(!hasLineOfSight(g, cx - 3, y, cx + 3, y, 2), "beyond max range fails even with a clear line");
+
+  g.map.tiles[y][cx - 1] = TILE.WALL;
+  g.map.objects[y][cx - 1] = OBJ.NONE;
+  ok(!hasLineOfSight(g, cx - 3, y, cx, y), "a wall directly on the line blocks sight");
+  g.map.tiles[y][cx - 1] = TILE.FLOOR; // restore for reuse below
+
+  ok(hasLineOfSight(g, cx, y, cx, y), "same tile is always in sight (distance 0)");
+}
+
+section("dispatched guards capture on sight, not just same-tile contact");
+{
+  const map = generateMap(31);
+  const { y } = map.center;
+  const cx = map.center.x;
+  const g = createGame(map, { prisoners: [{ x: cx, y }] });
+  clearStrip(g, y, cx - 4, cx + 4);
+  ok(g.prisoners[0].alive, "sanity: prisoner alive before any guard acts");
+
+  g.map.tiles[y][cx - 1] = TILE.WALL;
+  g.map.objects[y][cx - 1] = OBJ.NONE;
+  g.watcher.guards = [{ id: 2, x: cx - 3, y, quadrant: 0, life: GUARD_SIGHT_RANGE + 5 }];
+  moveGuards(g);
+  ok(g.prisoners[0].alive, "a wall between guard and prisoner prevents capture");
+
+  g.map.tiles[y][cx - 1] = TILE.FLOOR;
+  g.map.objects[y][cx - 1] = OBJ.NONE;
+  g.watcher.guards = [{ id: 3, x: cx - 3, y, quadrant: 0, life: GUARD_SIGHT_RANGE + 5 }];
+  moveGuards(g);
+  ok(!g.prisoners[0].alive, "a clear line within range captures without same-tile contact");
+}
 
 // --- Summary --------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
