@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.38.0";
+const BUILD = "beta-0.39.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -853,14 +853,20 @@ function updateItemBar() {
 function doUseSkill(skill) {
   const g = app.game;
   if (!g || g.turn !== "Watcher") return;
+  if (skill !== SKILLS.DISPATCH && app.armedDispatch) {
+    // Using any OTHER skill while dispatch is armed abandons the gesture —
+    // otherwise a stray leftover arm silently hijacks the player's next
+    // bluff/direction press into a quadrant pick they didn't intend.
+    app.armedDispatch = false;
+  }
   if (skill === SKILLS.DISPATCH) {
     // Needs a quadrant arg we don't have yet — arm it, then the next
     // direction press (1-4, same keys as bluff) picks the quadrant. Mirrors
     // the item/lockpick "arm, then press a direction" gesture already used
     // on the Prisoner side.
     if (!skillUsable(g, SKILLS.DISPATCH)) { app.audio.play("blocked"); return; }
-    app.armedDispatch = true;
-    app.ui.hint("Dispatch armed — press a direction (1-4) to pick a quadrant");
+    app.armedDispatch = !app.armedDispatch; // press again to cancel
+    app.ui.hint(app.armedDispatch ? "Dispatch armed — press a direction (1-4) to pick a quadrant" : hintFor());
     updateSkillBar();
     return;
   }
@@ -936,14 +942,19 @@ function updateSkillBar() {
     cd: g.watcher.skills[s] || 0,
     usable: skillUsable(g, s),
   }));
-  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|") + `|${padSlot}`;
+  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|") + `|${padSlot}|${app.armedDispatch ? 1 : 0}`;
   if (sig === _skillBarSig) return;
   _skillBarSig = sig;
   bar.classList.remove("empty");
   bar.innerHTML = entries
     .map((e, i) => {
       const info = SKILL_INFO[e.skill];
-      const cls = (e.cd > 0 ? " cooling" : e.usable ? "" : " unusable") + (padSlot === i ? " padsel" : "");
+      // Armed feedback matters most here: unlike items (which show an armed
+      // highlight already), DISPATCH needs a SECOND input (the quadrant) —
+      // without a visible cue a player who armed it and then can't tell why
+      // "nothing is happening" has no way to know it's mid-gesture.
+      const armed = e.skill === SKILLS.DISPATCH && app.armedDispatch;
+      const cls = (e.cd > 0 ? " cooling" : e.usable ? "" : " unusable") + (padSlot === i ? " padsel" : "") + (armed ? " armed" : "");
       const badge = e.cd > 0 ? `<span class="cd">${e.cd}</span>` : `<span class="ik">${i + 5}</span>`;
       return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${info.label}">` +
         `<span class="ic">${info.icon}</span>${badge}` +
