@@ -611,9 +611,16 @@ export function useSkill(game, skill, arg) {
     // arg is a quadrant index 0-3 (N/E/S/W), same convention as facing/bluff.
     if (!Number.isInteger(arg) || arg < 0 || arg > 3) return { ok: false, reason: "no-quadrant" };
     const post = game.map.guardPosts[arg];
+    // Stable per-guard id so the renderer can track a mesh across moves
+    // instead of re-keying by position (which changes every round).
+    const w = game.watcher;
+    w._guardSeq = (w._guardSeq || 0) + 1;
+    const id1 = w._guardSeq;
+    w._guardSeq += 1;
+    const id2 = w._guardSeq;
     game.watcher.guards.push(
-      { x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN },
-      { x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN }
+      { id: id1, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN },
+      { id: id2, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN }
     );
     spend();
     logMsg(game, `Guards dispatched to the ${DIRS[arg]} quadrant.`);
