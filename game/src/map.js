@@ -175,6 +175,19 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
   // on a doorless map.
   const items = placeItems(tiles, objects, ring, size, rng, cfg);
 
+  // Fixed per-quadrant guard posts for the Watcher's DISPATCH skill — one
+  // per cardinal side, symmetric by construction (same as the panopticon's
+  // ring layout), at the outer edge so dispatched guards have real ground
+  // to cover before reaching the interior.
+  const guardPosts = DIR_VEC.map(({ dx, dy }) => {
+    const r = Math.floor(size / 2) - 2;
+    let x = Math.max(1, Math.min(size - 2, c + dx * r));
+    let y = Math.max(1, Math.min(size - 2, c + dy * r));
+    const found = nearestFloor(tiles, objects, size, x, y);
+    if (found) { x = found.x; y = found.y; }
+    return { x, y };
+  });
+
   return {
     seed,
     cfg,
@@ -191,6 +204,7 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
     exit, // {x,y}
     spawn, // {x,y} — the primary spawn, unchanged shape for existing callers
     spawns, // [{x,y}, ...] — length === cfg.prisonerCount, spawns[0] === spawn
+    guardPosts, // [{x,y}, ...] length 4, index === quadrant (0 N, 1 E, 2 S, 3 W)
     ringCount: cfg.ringCount,
   };
 }
