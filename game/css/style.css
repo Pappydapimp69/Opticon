@@ -319,3 +319,20 @@ html, body {
 .item-chip.armed .iname, .item-chip.padsel .iname { color: #ffc75a; }
 .item-bar { padding-bottom: 18px; }
 @media (max-width: 720px) { .item-chip .iname { font-size: 9px; bottom: -15px; } }
+
+/* ---- Suspicion readout (Watcher only) ------------------------------------
+   The same per-quadrant noise/light/exit-bias score watcherAI.js already
+   computes to play the AI opponent — surfaced so aiming DISPATCH or just
+   choosing where to rotate is an informed read, not a guess. */
+.suspicion-hud {
+  position: absolute; top: 60px; right: 16px; z-index: 6;
+  background: rgba(12, 17, 30, 0.82); border: 1px solid #2f3c5c; border-radius: 10px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 5px;
+  min-width: 110px; pointer-events: none;
+}
+.suspicion-hud.empty { display: none; }
+.susp-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #93a4c8; }
+.susp-label { width: 12px; text-align: center; font-weight: 700; color: #dce6ff; }
+.susp-track { flex: 1; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
+.susp-fill { height: 100%; background: linear-gradient(90deg, #ff5c1a, #ffb46b); border-radius: 3px; transition: width .25s ease; }
+@media (max-width: 720px) { .suspicion-hud { top: 54px; right: 10px; min-width: 92px; padding: 6px 8px; } }

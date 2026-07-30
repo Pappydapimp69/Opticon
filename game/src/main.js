@@ -23,14 +23,14 @@ import {
   SKILLS,
   SKILL_INFO,
 } from "./rules.js";
-import { playWatcherTurn } from "./watcherAI.js";
+import { playWatcherTurn, scoreDirections, DIFFICULTY } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
 import { Renderer } from "./render.js";
 import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.37.0";
+const BUILD = "beta-0.38.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -958,6 +958,41 @@ function updateSkillBar() {
   });
 }
 
+const QUADRANT_LABEL = ["N", "E", "S", "W"];
+let _suspicionSig = "";
+// Same signal watcherAI.js's scoreDirections() already computes to play the
+// AI opponent, surfaced here so a human Watcher (aiming DISPATCH, or just
+// deciding where to rotate) gets the same read instead of guessing blind.
+// A fixed neutral tuning (medium) is used for the DISPLAY only — this never
+// touches the AI's own difficulty-tuned behaviour.
+function updateSuspicionHud() {
+  const bar = document.getElementById("suspicionHud");
+  if (!bar) return;
+  const g = app.game;
+  const show = g && g.turn === "Watcher" && humanControlsWatcher() && shouldShowWatcherInfo();
+  if (!show) {
+    if (_suspicionSig !== "") {
+      _suspicionSig = "";
+      bar.innerHTML = "";
+      bar.classList.add("empty");
+    }
+    return;
+  }
+  const scores = scoreDirections(g, DIFFICULTY.medium);
+  const max = Math.max(...scores, 0.001); // relative bars — same comparison the AI itself makes
+  const pct = scores.map((s) => Math.round((s / max) * 100));
+  const sig = pct.join(",");
+  if (sig === _suspicionSig) return;
+  _suspicionSig = sig;
+  bar.classList.remove("empty");
+  bar.innerHTML = QUADRANT_LABEL
+    .map((label, i) => (
+      `<div class="susp-row"><span class="susp-label">${label}</span>` +
+      `<div class="susp-track"><div class="susp-fill" style="width:${pct[i]}%"></div></div></div>`
+    ))
+    .join("");
+}
+
 // ---- Staged movement: nothing moves for real until the player commits ----
 // (Brain telegraph#E6: a cosmetic/preview stays presentation-only; only what
 // has real consequence touches authoritative state — here, the preview never
@@ -1352,6 +1387,7 @@ function loop(t) {
   updateDangerVignette();
   updateItemBar();
   updateSkillBar();
+  updateSuspicionHud();
   // Safety net: a staged path (and an armed break) only make sense during
   // the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") {
