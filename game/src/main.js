@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.34.0";
+const BUILD = "beta-0.35.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -853,6 +853,17 @@ function updateItemBar() {
 function doUseSkill(skill) {
   const g = app.game;
   if (!g || g.turn !== "Watcher") return;
+  if (skill === SKILLS.DISPATCH) {
+    // Needs a quadrant arg we don't have yet — arm it, then the next
+    // direction press (1-4, same keys as bluff) picks the quadrant. Mirrors
+    // the item/lockpick "arm, then press a direction" gesture already used
+    // on the Prisoner side.
+    if (!skillUsable(g, SKILLS.DISPATCH)) { app.audio.play("blocked"); return; }
+    app.armedDispatch = true;
+    app.ui.hint("Dispatch armed — press a direction (1-4) to pick a quadrant");
+    updateSkillBar();
+    return;
+  }
   let arg = null;
   if (skill === SKILLS.LOCK) {
     arg = nearestOpenDoorInGaze(g);
@@ -1065,6 +1076,17 @@ function handleWatcherIntent(intent, arg) {
   if (intent === "rotate") {
     if (rotateWatcher(g, arg).ok) app.audio.play("rotate");
   } else if (intent === "bluff") {
+    if (app.armedDispatch) {
+      // Same direction keys, reinterpreted: a quadrant pick for the armed
+      // DISPATCH skill instead of a claimed gaze direction.
+      app.armedDispatch = false;
+      const r = useSkill(g, SKILLS.DISPATCH, arg);
+      app.audio.play(r.ok ? "skill" : "blocked");
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+      app.ui.hint(hintFor());
+      updateSkillBar();
+      return;
+    }
     // A second bluff this turn goes through the DOUBLE_BLUFF skill instead
     // of overwriting the first — that's exactly what the skill buys.
     if (g.watcher.bluff != null && arg !== g.watcher.bluff && skillUsable(g, SKILLS.DOUBLE_BLUFF)) {
@@ -1081,6 +1103,7 @@ function handleWatcherIntent(intent, arg) {
   } else if (intent === "skill") {
     doUseSkill(arg);
   } else if (intent === "endTurn") {
+    app.armedDispatch = false;
     // Scan (commit), then end turn.
     const scan = watcherScan(g, exposureTier());
     app.audio.play("scan");

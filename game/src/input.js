@@ -108,6 +108,7 @@ export class Input {
       Digit6: () => this.onIntent("skill", "wideScan"),
       Digit7: () => this.onIntent("skill", "echo"),
       Digit8: () => this.onIntent("skill", "lock"),
+      Digit9: () => this.onIntent("skill", "dispatch"),
       Tab: () => this.onIntent("cycleView"), KeyV: () => this.onIntent("cycleView"),
       KeyR: () => this.onIntent("restart"),
     };
