@@ -10,3 +10,6 @@ game/tests/intro.png
 game/tests/menu-focus.png
 game/tests/mobile-*.png
 game/tests/path-*.png
+
+# MIRAGE headless test artifacts (screenshots regenerated on demand)
+mirage/tests/shot-*.png
