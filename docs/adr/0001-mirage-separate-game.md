@@ -1,6 +1,14 @@
 # ADR 0001 — MIRAGE is a separate game in this repo, not an Opticon mode
 
-**Status:** accepted · 2026-07-30 · applies to `mirage/`
+**Status:** superseded · 2026-07-30 · originally applied to `mirage/`
+**Superseded by:** MIRAGE was extracted into its own repository the same day,
+once gamepad support and a full test suite made it clear the game was staying —
+see **https://github.com/Pappydapimp69/mirage** and that repo's own
+`docs/adr/0001-extracted-from-opticon.md`. `mirage/` in this repo now contains
+only a pointer README. Everything below is kept for the historical record —
+the Three.js shim it describes no longer exists anywhere (the new repo vendors
+a real copy), and the T12/T26 costs it accepted are the ones the extraction
+paid off.
 
 ## Context
 
