@@ -7,7 +7,7 @@ import {
 } from "./state.js";
 import { createPercept, updatePercept, distortion } from "./percept.js";
 import { createRenderer } from "./render.js";
-import { createHud, renderDebrief } from "./hud.js";
+import { createHud, renderDebrief, paintHint } from "./hud.js";
 import { createInput, ACTIONS } from "./input.js";
 import { createAudio } from "./audio.js";
 import { hashSeed } from "./rng.js";
@@ -18,7 +18,13 @@ const el = (id) => document.getElementById(id);
 const canvas = el("gl");
 
 const audio = createAudio();
-let run = null; // { sim, percept, renderer, hud, input }
+// ONE persistent input instance for the whole app lifetime — title, pause,
+// debrief, and gameplay all read the same pad/keyboard, dispatched by
+// input.setMode('menu' | 'game'). A per-run instance (the previous design)
+// meant nothing before the first run existed could see a gamepad at all, so a
+// controller-only player had no way to even press Start.
+const input = createInput(canvas, { sensitivity: 1, onScheme: refreshSchemeUI });
+let run = null; // { sim, percept, renderer, hud }
 let paused = false;
 let selected = 0;
 let whisperTimer = 0;
@@ -27,6 +33,96 @@ let lastFrame = 0;
 const LAYERS = ["title", "hudLayer", "pauseLayer", "debriefLayer"];
 function screens(show) {
   for (const id of LAYERS) el(id).classList.toggle("hidden", id !== show);
+  input.setMode(show === "hudLayer" ? "game" : "menu");
+  if (show !== "hudLayer") setupMenuFocus(show);
+}
+
+// ---- gamepad/keyboard menu navigation --------------------------------------
+// Same shape as Opticon's menu grid nav: a screen's focusable controls carry
+// data-row/data-col, horizontal nav is confined to the current row and
+// vertical nav lands on the nearest column of the adjacent row — a single
+// button GRID per screen, not a flat list, so no direction can ever wander
+// into the wrong control (Brain: a flat single-axis focus list over visually
+// distinct groups lets any direction leak into the wrong group).
+const ROOT_SELECTOR = { title: "#title", pauseLayer: "#pauseLayer", debriefLayer: "#debriefLayer" };
+const menu = { root: null, row: 0, col: 0 };
+
+function menuElements() {
+  const sel = ROOT_SELECTOR[menu.root];
+  return sel ? Array.from(document.querySelectorAll(`${sel} [data-row]`)) : [];
+}
+function currentFocusEl() {
+  return menuElements().find((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
+}
+function menuFocusApply() {
+  document.querySelectorAll(".gpfocus").forEach((e) => e.classList.remove("gpfocus"));
+  const cur = currentFocusEl();
+  if (cur) {
+    cur.classList.add("gpfocus");
+    cur.scrollIntoView?.({ block: "nearest" });
+  }
+}
+function menuNavX(delta) {
+  const els = menuElements().filter((e) => Number(e.dataset.row) === menu.row);
+  const cols = els.map((e) => Number(e.dataset.col)).sort((a, b) => a - b);
+  if (cols.length < 2) return;
+  const i = cols.indexOf(menu.col);
+  const next = Math.max(0, Math.min(cols.length - 1, (i < 0 ? 0 : i) + delta));
+  if (cols[next] === menu.col) return;
+  menu.col = cols[next];
+  menuFocusApply();
+}
+function menuNavY(delta) {
+  const rows = [...new Set(menuElements().map((e) => Number(e.dataset.row)))].sort((a, b) => a - b);
+  if (rows.length < 2) return;
+  const i = rows.indexOf(menu.row);
+  const next = Math.max(0, Math.min(rows.length - 1, (i < 0 ? 0 : i) + delta));
+  if (rows[next] === menu.row) return;
+  menu.row = rows[next];
+  const rowCols = menuElements().filter((e) => Number(e.dataset.row) === menu.row).map((e) => Number(e.dataset.col));
+  if (!rowCols.includes(menu.col)) menu.col = rowCols[0] ?? 0;
+  menuFocusApply();
+}
+function menuConfirm() {
+  // Not a synthetic keyboard/mouse event, just `.click()` — the DOM element's
+  // own listener (set difficulty, start the run, resume, …) does the real work
+  // identically regardless of what triggered it, the same pattern Opticon uses.
+  currentFocusEl()?.click();
+}
+function menuCancel() {
+  if (menu.root === "pauseLayer") togglePause(); // B backs out to resume, same as Escape
+}
+function setupMenuFocus(root) {
+  const prevRoot = menu.root;
+  menu.root = root;
+  const els = menuElements();
+  if (!els.length) {
+    input.setMenuHandlers(null, null, null, null);
+    return;
+  }
+  const stillValid = prevRoot === root && els.some((e) => Number(e.dataset.row) === menu.row && Number(e.dataset.col) === menu.col);
+  if (!stillValid) {
+    menu.row = Number(els[0].dataset.row);
+    menu.col = Number(els[0].dataset.col);
+  }
+  menuFocusApply();
+  input.setMenuHandlers(menuNavX, menuNavY, menuConfirm, menuCancel);
+}
+
+// ---- device-adaptive UI (Brain: device-adaptive-ui / show-the-active-scheme)
+// Reshape the on-screen UI to match whichever device is actually in the
+// player's hands, live, as devices change — never make the player translate.
+function menuHintFor(scheme) {
+  return {
+    keyboard: "Arrows / WASD move · Enter / Space select",
+    gamepad: "D-pad / stick move · [A] select · [B] back",
+    touch: "Tap to select",
+  }[scheme] || "";
+}
+function refreshSchemeUI(scheme) {
+  document.body.dataset.scheme = scheme;
+  document.querySelectorAll(".menu-hints").forEach((e) => paintHint(e, menuHintFor(scheme)));
+  if (run) run.hud.setHints(scheme);
 }
 
 function startRun({ seed, difficulty } = {}) {
@@ -35,17 +131,19 @@ function startRun({ seed, difficulty } = {}) {
   const percept = createPercept();
   const renderer = createRenderer(canvas, sim);
   const hud = createHud(sim, percept);
-  const input = createInput(canvas, { sensitivity: 1 });
   selected = 0;
   paused = false;
   whisperTimer = 0;
-  run = { sim, percept, renderer, hud, input };
-  hud.setHints(input.state.scheme);
+  run = { sim, percept, renderer, hud };
+  hud.setHints(input.activeScheme);
   hud.say("Six of you. One basin. Keep them together.", "warn");
   el("seedLabel").textContent = `seed ${seedValue}`;
   screens("hudLayer");
   audio.start();
-  input.requestLock();
+  // A controller player has no use for mouse pointer lock — their look comes
+  // from the right stick regardless of lock state — and requesting it here
+  // would either no-op or flash a browser permission prompt for nothing.
+  if (input.activeScheme !== "gamepad") input.requestLock();
   lastFrame = 0;
   // No assignment to window.__mirage here: `sim`, `percept` and `renderer` are
   // getters over the live `run`, so they already follow this new run. Writing to
@@ -75,13 +173,20 @@ function handleAction(action, arg) {
       break;
     }
     case ACTIONS.CHECK_IN: {
-      const target = sim.companions[typeof arg === "number" ? arg : selected];
+      // An explicit arg (a keyboard digit) both targets AND becomes the shared
+      // selection, so the roster highlight and Q/R/LB/RB cycling anchor move
+      // with it. Without updating `selected` here, a gamepad's X/Y buttons —
+      // which carry no arg and rely on this shared value — would act on
+      // whatever LB/RB last cycled to, never on a digit-picked companion.
+      if (typeof arg === "number") selected = arg;
+      const target = sim.companions[selected];
       if (!target) return;
       hud.showReport(checkIn(sim, target.id));
       break;
     }
     case ACTIONS.DOSE: {
-      const target = sim.companions[typeof arg === "number" ? arg : selected];
+      if (typeof arg === "number") selected = arg;
+      const target = sim.companions[selected];
       if (!target) return;
       if (useDose(sim, target.id)) audio.play("dose");
       else audio.play("deny");
@@ -105,7 +210,7 @@ function togglePause() {
   if (!run || run.sim.status !== "playing") return;
   paused = !paused;
   screens(paused ? "pauseLayer" : "hudLayer");
-  if (!paused) run.input.requestLock();
+  if (!paused && input.activeScheme !== "gamepad") input.requestLock();
 }
 
 /** One simulation + presentation step. Separated from rAF so tests can drive it. */
@@ -172,16 +277,18 @@ function finish() {
 
 function frame(now) {
   requestAnimationFrame(frame);
-  if (!run || paused || run.sim.status !== "playing") return;
   if (!lastFrame) lastFrame = now;
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   if (dt <= 0) return;
-  const intent = run.input.sample(dt);
-  if (intent.scheme !== run.hud.lastScheme) {
-    run.hud.setHints(intent.scheme);
-    run.hud.lastScheme = intent.scheme;
-  }
+  // input.poll() runs every frame regardless of screen — that is what lets a
+  // gamepad drive the title/pause/debrief menus before any run exists at all.
+  // In 'menu' mode it only has side effects (scheme tracking, dispatching to
+  // the registered menu handlers) and returns null; in 'game' mode it also
+  // returns the movement intent the sim step needs. Scheme-change UI updates
+  // are pushed via the onScheme callback (refreshSchemeUI), not polled here.
+  const intent = input.poll(dt);
+  if (!run || paused || run.sim.status !== "playing" || !intent) return;
   step(dt, intent);
 }
 
@@ -207,7 +314,15 @@ function boot() {
     paused = false;
     screens("title");
   });
-  el("volume").addEventListener("input", (e) => audio.setVolume(Number(e.target.value)));
+  // Discrete steps rather than a range slider — see the HTML comment: a
+  // slider has no natural gamepad binding, but these buttons slot straight
+  // into the same row/col grid nav as everything else in the pause menu.
+  for (const btn of document.querySelectorAll("[data-vol]")) {
+    btn.addEventListener("click", () => {
+      audio.setVolume(Number(btn.dataset.vol));
+      for (const b of document.querySelectorAll("[data-vol]")) b.classList.toggle("sel", b === btn);
+    });
+  }
   // Touch action buttons mirror the keyboard verbs.
   el("btnSurvey").addEventListener("click", () => run && handleAction(ACTIONS.SURVEY));
   el("btnCheck").addEventListener("click", () => run && handleAction(ACTIONS.CHECK_IN, selected));

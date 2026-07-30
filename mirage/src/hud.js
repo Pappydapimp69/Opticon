@@ -11,6 +11,21 @@ import { LOG_RADIUS, TIME_LIMIT, discoveredCount } from "./state.js";
 
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
+/**
+ * Paint a hint string into an element, turning `[TOKEN]` markers into coloured
+ * face-button badges (A/B/X/Y) or grey chips (LB/RB/Start/…). Device-adaptive UI
+ * means never making the player translate: a gamepad hint should show the button
+ * shapes actually on the controller, not a word standing in for one. Strings for
+ * keyboard/touch schemes simply contain no brackets, so this is a no-op for them.
+ */
+export function paintHint(el, text) {
+  if (!el) return;
+  el.innerHTML = text.replace(
+    /\[([A-Za-z0-9]+)\]/g,
+    (_, tok) => `<span class="pad-badge b-${tok.toLowerCase()}">${tok}</span>`,
+  );
+}
+
 export function createHud(sim, percept) {
   const el = {
     roster: document.getElementById("roster"),
@@ -132,10 +147,10 @@ export function createHud(sim, percept) {
   function setHints(scheme) {
     const text = {
       keyboard: "WASD move · Shift run · E survey · 1–5 check in · Shift+1–5 dose · Esc pause",
-      gamepad: "Stick move · A survey · X check in · Y dose · LB/RB select · Start pause",
+      gamepad: "Stick move · [A] survey · [X] check in · [Y] dose · [LB]/[RB] select · [Start] pause",
       touch: "Left half steers · right half looks · buttons bottom-right",
     }[scheme] || "";
-    if (el.hints) el.hints.textContent = text;
+    paintHint(el.hints, text);
   }
 
   return { update, say, showReport, setHints, el };
@@ -169,6 +184,6 @@ export function renderDebrief(container, report) {
           .join("")}
       </table>
       <p class="debrief-foot">Doses used ${report.doseUses} · recoveries ${report.recoveries}</p>
-      <button id="againBtn" class="big-btn">New basin</button>
+      <button id="againBtn" class="big-btn" data-row="0" data-col="0">New basin</button>
     </div>`;
 }

@@ -33,15 +33,17 @@
         <div class="field">
           <label class="field-label">Pressure</label>
           <div class="diff-row">
-            <button class="diff" data-diff="gentle">Gentle</button>
-            <button class="diff sel" data-diff="standard">Standard</button>
-            <button class="diff" data-diff="bleak">Bleak</button>
+            <button class="diff" data-diff="gentle" data-row="0" data-col="0">Gentle</button>
+            <button class="diff sel" data-diff="standard" data-row="0" data-col="1">Standard</button>
+            <button class="diff" data-diff="bleak" data-row="0" data-col="2">Bleak</button>
           </div>
         </div>
       </div>
 
-      <button id="startBtn" class="big-btn">Walk in</button>
-      <button id="howBtn" class="text-btn">How to play</button>
+      <button id="startBtn" class="big-btn" data-row="1" data-col="0">Walk in</button>
+      <button id="howBtn" class="text-btn" data-row="2" data-col="0">How to play</button>
+
+      <p id="menuHints" class="menu-hints"></p>
 
       <div id="howto" class="howto hidden">
         <p><b>Goal.</b> Find and survey all six markers, then get back to camp
@@ -101,9 +103,18 @@
       <h2>Standing still</h2>
       <p class="tagline small">The basin does not stop, but the clock does. Nobody drains while paused.</p>
       <label class="field-label">Volume</label>
-      <input id="volume" type="range" min="0" max="1" step="0.05" value="0.7" />
-      <button id="resumeBtn" class="big-btn">Keep walking</button>
-      <button id="quitBtn" class="text-btn">Abandon the survey</button>
+      <!-- Discrete steps, not a range slider: a slider has no meaningful gamepad
+           binding, but four buttons slot straight into the same row/col grid
+           nav as everything else, with no separate drag-input path to build. -->
+      <div class="diff-row">
+        <button class="diff vol" data-vol="0" data-row="0" data-col="0">Off</button>
+        <button class="diff vol" data-vol="0.35" data-row="0" data-col="1">Low</button>
+        <button class="diff vol sel" data-vol="0.7" data-row="0" data-col="2">Medium</button>
+        <button class="diff vol" data-vol="1" data-row="0" data-col="3">Full</button>
+      </div>
+      <button id="resumeBtn" class="big-btn" data-row="1" data-col="0">Keep walking</button>
+      <button id="quitBtn" class="text-btn" data-row="2" data-col="0">Abandon the survey</button>
+      <p class="menu-hints"></p>
     </div>
   </div>
 
