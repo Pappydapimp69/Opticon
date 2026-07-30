@@ -80,6 +80,22 @@ async function startAs(page, btn) {
   const chips = await page.$$eval("#skillBar .skill-chip", (els) => els.length);
   check(chips === 5, `skill bar renders all five skills (got ${chips})`);
 
+  // Suspicion HUD: the same per-quadrant score watcherAI.js computes for
+  // the AI opponent, surfaced so a human Watcher can aim informed instead
+  // of guessing. Force a strong, unambiguous noise reading due north and
+  // confirm that quadrant's bar actually reads highest.
+  const rows = await page.$$eval("#suspicionHud .susp-row", (els) => els.length);
+  check(rows === 4, `suspicion HUD renders one row per quadrant (got ${rows})`);
+  await page.evaluate(() => {
+    const g = window.__opticon.game;
+    const { center } = g.map;
+    g.noise = [{ x: center.x, y: center.y - 5, ttl: 6 }]; // due north
+  });
+  await page.waitForTimeout(250);
+  const widths = await page.$$eval("#suspicionHud .susp-fill", (els) => els.map((e) => parseInt(e.style.width)));
+  check(widths[0] === 100 && widths.slice(1).every((w) => w < 100), `north noise reads as the dominant quadrant (got ${JSON.stringify(widths)})`);
+  await page.evaluate(() => { window.__opticon.game.noise = []; });
+
   // Wide scan is always usable — fire it with its key and confirm cooldown.
   await page.keyboard.press("Digit6");
   await page.waitForTimeout(250);
@@ -133,6 +149,8 @@ async function startAs(page, btn) {
   await p2.waitForTimeout(300);
   const barHiddenForPrisoner = await p2.$eval("#skillBar", (el) => el.classList.contains("empty") && el.innerHTML === "");
   check(barHiddenForPrisoner, "skill bar is empty on the hotseat Prisoner's turn (no readiness leak)");
+  const suspicionHiddenForPrisoner = await p2.$eval("#suspicionHud", (el) => el.classList.contains("empty") && el.innerHTML === "");
+  check(suspicionHiddenForPrisoner, "suspicion HUD is empty on the hotseat Prisoner's turn too");
 
   check(errs.length === 0, `hotseat scenario: no console errors (${errs.length} found)`);
   errs.slice(0, 5).forEach((e) => console.log("    •", e));
