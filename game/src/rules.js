@@ -109,6 +109,7 @@ export function createGame(map, opts = {}) {
     watcher: {
       facing: opts.watcherFacing ?? 0,
       bluff: null, // a direction index the Watcher claims to also be watching
+      lastBluff: null, // snapshot of `bluff` from the turn just ended (see endWatcherTurn)
       rotatedThisTurn: false,
       // AI-controlled-only bookkeeping: an exponentially-blended running
       // suspicion per cardinal direction, letting a harder AI stay wary of a
@@ -686,6 +687,10 @@ export function endWatcherTurn(game) {
   game.noise = game.noise
     .map((n) => ({ ...n, ttl: n.ttl - 1 }))
     .filter((n) => n.ttl > 0);
+  // Snapshot before clearing: the prisoner AI's gullible check reads what was
+  // CLAIMED last turn (lastBluff), since the live bluff itself only exists
+  // during the Watcher's own turn and is gone by the time prisoners act.
+  game.watcher.lastBluff = game.watcher.bluff;
   game.watcher.bluff = null;
   game.watcher.bluff2 = null;
   game.watcher.wideScan = false; // armed for exactly one scan

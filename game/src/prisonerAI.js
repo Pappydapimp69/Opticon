@@ -19,14 +19,18 @@ import {
 import { ITEM_KINDS, OBJ } from "./map.js";
 import { bfsPath, stepToward } from "./pathfind.js";
 
-// Is a tile a place the Watcher could capture you on (lit AND in true/bluff gaze)?
-function dangerous(game, x, y) {
+// Is a tile a place the Watcher could capture you on (lit AND in the gaze)?
+// `believedFacing`, when set, means this prisoner was fooled this turn —
+// it judges risk ONLY by that (possibly wrong) direction instead of the
+// true facing. Note: `game.watcher.bluff` (the LIVE claim) only exists
+// during the Watcher's own turn and is already cleared by the time a
+// prisoner acts, so ground truth here is just the real facing — the
+// gullible check below is what gives a bluff any effect at all (via
+// `lastBluff`, a one-turn-stale snapshot of what was claimed).
+function dangerous(game, x, y, believedFacing) {
   const lit = isLit(game, x, y);
   if (!lit) return false;
-  const g = game.watcher;
-  if (inWatcherGaze(game, g.facing, x, y)) return true;
-  if (g.bluff != null && inWatcherGaze(game, g.bluff, x, y)) return true;
-  return false;
+  return inWatcherGaze(game, believedFacing ?? game.watcher.facing, x, y);
 }
 
 // Direction (0..3) from a to b if adjacent, else -1.
@@ -78,10 +82,17 @@ const STALL_LIMIT = 3;
 //   avoidGaze — route around the whole watched quadrant (measured harmful;
 //               retained as a named, off-by-default knob so the refutation
 //               is reproducible rather than lost)
+// gullible — chance the prisoner trusts what the Watcher claimed LAST turn
+// (lastBluff) as the true gaze this turn, i.e. actually gets fooled. This is
+// the rules-level lever T25 said was still missing: previously a human
+// Watcher's bluff was pure cosmetic UI — the AI's danger check only ever
+// consulted the true facing (the live bluff field is already null by the
+// time a prisoner acts), so bluffing never opened a real blind spot. hard
+// never falls for it, matching the direction the other fields already set.
 export const PRISONER_SKILL = Object.freeze({
-  easy:   { caution: 0.0, dawdle: 0.6, useItems: false, avoidGaze: false },
-  medium: { caution: 1.0, dawdle: 0.4, useItems: true,  avoidGaze: false },
-  hard:   { caution: 1.0, dawdle: 0.0, useItems: true,  avoidGaze: false },
+  easy:   { caution: 0.0, dawdle: 0.6, useItems: false, avoidGaze: false, gullible: 0.55 },
+  medium: { caution: 1.0, dawdle: 0.4, useItems: true,  avoidGaze: false, gullible: 0.22 },
+  hard:   { caution: 1.0, dawdle: 0.0, useItems: true,  avoidGaze: false, gullible: 0 },
 });
 // How far off-route the AI will detour to grab a pickup. MEASURED, not
 // guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
@@ -113,7 +124,7 @@ function nearbyItem(game, p) {
 // Spend carried items when they'd actually help THIS turn. Each check
 // mirrors the item's own precondition, so a use is never attempted that
 // rules.js would just refuse.
-function useItemsOpportunistically(game, p, committed, rng) {
+function useItemsOpportunistically(game, p, committed, rng, believedFacing) {
   // CUTTERS: standing next to a live switch, kill the circuit for good —
   // permanently removing light is worth more than any single turn's move.
   if (p.items.includes(ITEM_KINDS.CUTTERS)) {
@@ -140,7 +151,7 @@ function useItemsOpportunistically(game, p, committed, rng) {
   // DISTRACT: only when currently standing somewhere the Watcher could
   // catch us — throw the decoy AWAY from the exit so it pulls attention
   // off our actual route rather than onto it.
-  if (p.items.includes(ITEM_KINDS.DISTRACT) && p.mp >= 2 && dangerous(game, p.x, p.y)) {
+  if (p.items.includes(ITEM_KINDS.DISTRACT) && p.mp >= 2 && dangerous(game, p.x, p.y, believedFacing)) {
     const exit = game.map.exit;
     const toExit = Math.abs(exit.x - p.x) > Math.abs(exit.y - p.y)
       ? (exit.x > p.x ? 1 : 3)
@@ -174,7 +185,13 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   // stalemate can never persist indefinitely.
   const committed = p.stalledTurns >= STALL_LIMIT;
 
-  if (tune.useItems) useItemsOpportunistically(game, p, committed, rng);
+  // Rolled once per turn, not per tile: a fooled prisoner stays fooled for
+  // the whole turn rather than re-guessing at every step.
+  const believedFacing = (tune.gullible > 0 && game.watcher.lastBluff != null && rng() < tune.gullible)
+    ? game.watcher.lastBluff
+    : null;
+
+  if (tune.useItems) useItemsOpportunistically(game, p, committed, rng, believedFacing);
 
   // A short detour to a pickup, but never while committed — the whole point
   // of the commit state is that it stops making side trips.
@@ -182,7 +199,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
-    const avoid = committed ? null : buildAvoidSet(game, tune.avoidGaze);
+    const avoid = committed ? null : buildAvoidSet(game, tune.avoidGaze, believedFacing);
     const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
     const path = bfsPath(game.map, p.x, p.y, goal.x, goal.y, avoid);
     if (!path || path.length < 2) break;
@@ -195,7 +212,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
     // moved (so we can safely stop without wasting the turn), hold position —
     // unless we've committed, in which case danger no longer holds us back.
     if (!committed && rng() < tune.caution) {
-      const endsDangerous = dangerous(game, next.x, next.y);
+      const endsDangerous = dangerous(game, next.x, next.y, believedFacing);
       const nearExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y) <= 2;
       if (endsDangerous && stepsThisTurn >= 1 && !nearExit) break;
     }
@@ -246,7 +263,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   return { steps: stepsThisTurn, path: walked, from: startPos };
 }
 
-function buildAvoidSet(game, avoidGaze) {
+function buildAvoidSet(game, avoidGaze, believedFacing) {
   // Soft-avoid every currently dangerous tile. bfsPath falls back to ignoring
   // this set if no safe route exists, so it never deadlocks.
   const set = new Set();
@@ -259,7 +276,7 @@ function buildAvoidSet(game, avoidGaze) {
         const tx = l.x + xx;
         const ty = l.y + yy;
         if (tx < 0 || ty < 0 || tx >= size || ty >= size) continue;
-        if (dangerous(game, tx, ty)) set.add(`${tx},${ty}`);
+        if (dangerous(game, tx, ty, believedFacing)) set.add(`${tx},${ty}`);
       }
     }
   }
@@ -268,7 +285,7 @@ function buildAvoidSet(game, avoidGaze) {
   // will still be pointing there next turn. bfsPath falls back to ignoring
   // the set entirely when no route avoids it, so this can never deadlock.
   if (avoidGaze) {
-    const g = game.watcher;
+    const g = believedFacing != null ? { facing: believedFacing } : game.watcher;
     for (let yy = 0; yy < size; yy++) {
       for (let xx = 0; xx < size; xx++) {
         if (inWatcherGaze(game, g.facing, xx, yy)) set.add(`${xx},${yy}`);
