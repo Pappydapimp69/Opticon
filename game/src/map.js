@@ -161,7 +161,7 @@ export function generateMap(seed = 1, cfg = MAP_DEFAULTS) {
   // BFS from the primary spawn, so they land in the SAME connected
   // component by construction — ensureConnected below only needs to
   // guarantee the primary spawn reaches the exit for all of them to.
-  const spawns = placeSpawns(tiles, objects, ring, size, c, cfg, exit, cfg.prisonerCount || 1);
+  const spawns = placeSpawns(tiles, objects, ring, size, c, cfg, exit, cfg.prisonerCount || 1, rng);
   const spawn = spawns[0];
 
   // Repair connectivity: guarantee spawn can reach exit (flood fill; carve if needed).
@@ -358,19 +358,25 @@ function placeSpawn(tiles, objects, ring, size, c, cfg, exit) {
   return { x, y };
 }
 
-// Places `count` spawn points: the primary one via placeSpawn, then the
-// group's remaining members via a floor-only BFS outward from it — the
-// group starts together in one cluster, not scattered across the map, and
-// every additional spawn lands on plain open floor (never a switch/lamp/
-// exit tile another prisoner or the map itself depends on).
-function placeSpawns(tiles, objects, ring, size, c, cfg, exit, count) {
+// Places `count` spawn points: the primary one via placeSpawn (unchanged —
+// offset ~90deg from the exit, per the T24 bounded-run design), then the
+// group's remaining members via farthest-point sampling over every floor
+// tile reachable from the primary. Reachable-from-primary keeps the exit
+// connectivity guarantee (ensureConnected only has to carve FROM the
+// primary; anything already in its connected component is exit-reachable
+// too), but picking the candidate FARTHEST from every spawn chosen so far
+// (rng-broken ties) spreads the group across the map's quadrants instead of
+// clustering them in one corner, which is what nearest-first BFS did.
+function placeSpawns(tiles, objects, ring, size, c, cfg, exit, count, rng = Math.random) {
   const primary = placeSpawn(tiles, objects, ring, size, c, cfg, exit);
   const spawns = [primary];
   if (count <= 1) return spawns;
 
+  // Collect every open-floor tile reachable from the primary spawn.
   const seen = new Set([`${primary.x},${primary.y}`]);
   const queue = [primary];
-  while (spawns.length < count && queue.length) {
+  const candidates = [];
+  while (queue.length) {
     const cur = queue.shift();
     for (const { dx, dy } of DIR_VEC) {
       const nx = cur.x + dx;
@@ -380,14 +386,36 @@ function placeSpawns(tiles, objects, ring, size, c, cfg, exit, count) {
       if (seen.has(key)) continue;
       seen.add(key);
       if (tiles[ny][nx] !== TILE.FLOOR) continue;
+      // A switch can never actually be crossed (see pathfind.js
+      // prisonerPassable) — treating it as a pass-through node here would
+      // "discover" candidates only reachable by walking through one, which
+      // real in-game pathing then can't actually reach.
+      if (objects[ny][nx] === OBJ.SWITCH || objects[ny][nx] === OBJ.LIGHT) continue;
       queue.push({ x: nx, y: ny });
-      if (objects[ny][nx] === OBJ.NONE) {
-        spawns.push({ x: nx, y: ny });
-        if (spawns.length >= count) break;
-      }
+      if (objects[ny][nx] === OBJ.NONE) candidates.push({ x: nx, y: ny });
     }
   }
-  // A tight corner could run out of nearby open floor — reuse the primary
+
+  while (spawns.length < count && candidates.length) {
+    let bestIdx = 0;
+    let bestDist = -1;
+    for (let i = 0; i < candidates.length; i++) {
+      const cand = candidates[i];
+      let minDist = Infinity;
+      for (const s of spawns) {
+        const d = Math.abs(cand.x - s.x) + Math.abs(cand.y - s.y);
+        if (d < minDist) minDist = d;
+      }
+      // Tiny rng-scaled jitter so ties (common on symmetric maps) don't
+      // always resolve to the same candidate — keeps spawns seed-varied
+      // rather than deterministic-degenerate across similar maps.
+      const scored = minDist + rng() * 0.5;
+      if (scored > bestDist) { bestDist = scored; bestIdx = i; }
+    }
+    spawns.push(candidates[bestIdx]);
+    candidates.splice(bestIdx, 1);
+  }
+  // A tight corner could run out of reachable open floor — reuse the primary
   // tile rather than leave a slot undefined; rules.js never requires
   // distinct starting tiles (two prisoners CAN share a spawn cell).
   while (spawns.length < count) spawns.push({ x: primary.x, y: primary.y });
