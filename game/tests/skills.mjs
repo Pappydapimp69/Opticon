@@ -78,7 +78,7 @@ async function startAs(page, btn) {
 
   await page.waitForTimeout(300);
   const chips = await page.$$eval("#skillBar .skill-chip", (els) => els.length);
-  check(chips === 4, `skill bar renders all four skills (got ${chips})`);
+  check(chips === 5, `skill bar renders all five skills (got ${chips})`);
 
   // Wide scan is always usable — fire it with its key and confirm cooldown.
   await page.keyboard.press("Digit6");
@@ -91,6 +91,29 @@ async function startAs(page, btn) {
   check(afterWide.cd > 0, `wide scan went on cooldown (${afterWide.cd})`);
   const cooling = await page.$$eval("#skillBar .skill-chip.cooling", (els) => els.length);
   check(cooling >= 1, "the spent skill renders as cooling down");
+
+  // Dispatch guards: arm with 9, pick a quadrant with 1-4 (must wait out
+  // wide scan's cooldown from above — dispatch has its own, separate one).
+  const quadrant = await page.evaluate(() => {
+    const g = window.__opticon.game;
+    const { center } = g.map;
+    const dx = g.map.exit.x - center.x, dy = g.map.exit.y - center.y;
+    return Math.abs(dy) >= Math.abs(dx) ? (dy < 0 ? 0 : 2) : (dx > 0 ? 1 : 3);
+  });
+  await page.keyboard.press("Digit9");
+  await page.waitForTimeout(150);
+  const armed = await page.evaluate(() => window.__opticon.armedDispatch);
+  check(armed === true, "pressing 9 arms dispatch");
+  await page.keyboard.press(["Digit1", "Digit2", "Digit3", "Digit4"][quadrant]);
+  await page.waitForTimeout(200);
+  const afterDispatch = await page.evaluate(() => ({
+    guards: window.__opticon.game.watcher.guards.length,
+    meshes: window.__opticon.renderer.guardMeshes.size,
+    armed: window.__opticon.armedDispatch,
+  }));
+  check(afterDispatch.guards === 2, `dispatch spawns 2 guards (got ${afterDispatch.guards})`);
+  check(afterDispatch.meshes === 2, `renderer builds a mesh per guard (got ${afterDispatch.meshes})`);
+  check(afterDispatch.armed === false, "dispatch clears the armed flag once fired");
 
   check(errors.length === 0, `watcher scenario: no console errors (${errors.length} found)`);
   await page.close();

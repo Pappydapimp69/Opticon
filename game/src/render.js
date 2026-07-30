@@ -29,6 +29,7 @@ const COLORS = {
   pathPreview: 0xf5e6a8,
   item: 0xffc75a,
   captureFlash: 0xffffff,
+  guard: 0xff5c1a,
 };
 
 // World scale: one grid tile == TILE_W world units.
@@ -380,6 +381,15 @@ export class Renderer {
     this.groups.avatars = avatarGroup;
     this.scene.add(avatarGroup);
 
+    // --- Dispatched guards: built lazily (they don't exist until the
+    // DISPATCH skill is used), synced by id in update() below. A sharp
+    // angular silhouette + warning colour reads as "hostile/institutional"
+    // against the prisoners' rounded cyan capsules.
+    this.guardGroup = new THREE.Group();
+    this.groups.guards = this.guardGroup;
+    this.scene.add(this.guardGroup);
+    this.guardMeshes = new Map(); // id -> { group, light }
+
     // --- Watcher gaze wedge (a flat sector on the ground).
     this.gazeMesh = this.makeWedge(COLORS.gaze, 0.22);
     this.bluffMesh = this.makeWedge(COLORS.bluff, 0.14);
@@ -519,6 +529,30 @@ export class Renderer {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.visible = false;
     return mesh;
+  }
+
+  // A dispatched guard: sharp cone body (vs. the prisoners' rounded capsule)
+  // in a warning colour, plus a ground ring so it reads from the overview
+  // camera the same way item pickups do.
+  makeGuardMesh() {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.ConeGeometry(0.26, 0.55, 5),
+      new THREE.MeshLambertMaterial({ color: COLORS.guard, emissive: 0x3a1200 })
+    );
+    body.position.y = 0.4;
+    group.add(body);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.42, 20),
+      new THREE.MeshBasicMaterial({ color: COLORS.guard, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    group.add(ring);
+    const light = new THREE.PointLight(COLORS.guard, 0.7, 4, 2);
+    light.position.y = 0.6;
+    group.add(light);
+    return { group, body, ring, light };
   }
 
   // Enqueue a sequence of grid tiles {x,y,event} for prisoner `prisonerIndex`'s
@@ -680,6 +714,34 @@ export class Renderer {
       const [wx2, wy2] = k.split(",").map(Number);
       const broken = game.brokenWindows.has(wy2 * map.size + wx2);
       mesh.visible = !broken;
+    }
+
+    // Guards (DISPATCH skill): sync by stable id, not position — a guard's
+    // (x,y) changes every round via moveGuards(). Visible in every view (not
+    // gated like prisoner avatars): unlike the abstract tower gaze, a
+    // physically dispatched squad is a real hazard a Prisoner should be able
+    // to see coming.
+    const liveIds = new Set();
+    for (const guard of game.watcher.guards) {
+      liveIds.add(guard.id);
+      let m = this.guardMeshes.get(guard.id);
+      if (!m) {
+        m = this.makeGuardMesh();
+        this.guardGroup.add(m.group);
+        m.group.position.set(this.worldX(guard.x), 0, this.worldZ(guard.y));
+        this.guardMeshes.set(guard.id, m);
+      }
+      const tx = this.worldX(guard.x);
+      const tz = this.worldZ(guard.y);
+      const k = smoothing(dt, 0.15);
+      m.group.position.x += (tx - m.group.position.x) * k;
+      m.group.position.z += (tz - m.group.position.z) * k;
+      m.body.rotation.y = this.time * 3; // spinning "on alert" tell
+    }
+    for (const [id, m] of this.guardMeshes) {
+      if (liveIds.has(id)) continue;
+      this.guardGroup.remove(m.group);
+      this.guardMeshes.delete(id);
     }
 
     // Self-noise: this prisoner's own "I heard that" markers. Role-gated only

@@ -14,6 +14,7 @@
 //    and gated by tile light level.
 
 import { TILE, OBJ, DIRS, DIR_VEC, ITEM_KINDS, ITEM_INFO } from "./map.js";
+import { bfsPath } from "./pathfind.js";
 
 export const MP_PER_TURN = 3;
 export const ITEM_CAP = 2; // carried at once — forces a real "which do I keep" choice
@@ -27,6 +28,7 @@ export const SKILLS = Object.freeze({
   WIDE_SCAN: "wideScan", // this scan sweeps 180 deg instead of 90
   ECHO: "echo", // refresh every current noise marker to full TTL
   LOCK: "lock", // slam an open door shut from the tower
+  DISPATCH: "dispatch", // send guards to hunt a quadrant
 });
 
 export const SKILL_INFO = Object.freeze({
@@ -34,7 +36,10 @@ export const SKILL_INFO = Object.freeze({
   [SKILLS.WIDE_SCAN]: { label: "Wide scan", icon: "🔦", cooldown: 4 },
   [SKILLS.ECHO]: { label: "Echo memory", icon: "📡", cooldown: 3 },
   [SKILLS.LOCK]: { label: "Remote lock", icon: "🔒", cooldown: 4 },
+  [SKILLS.DISPATCH]: { label: "Dispatch guards", icon: "🚨", cooldown: 4 },
 });
+export const GUARD_SPEED = 5; // tiles/turn — faster than a prisoner's MP_PER_TURN
+export const GUARD_LIFESPAN = 6; // turns a dispatched pair searches before recalled
 // Hard cap on turns. A game with no cap can in principle run forever
 // against a passive human Prisoner, and the Watcher had no win condition of
 // last resort. Chosen from the balance sim's own distribution rather than
@@ -123,6 +128,9 @@ export function createGame(map, opts = {}) {
       // Set for exactly one scan by WIDE_SCAN — widens the capture wedge from
       // 90 to 180 degrees for that scan only.
       wideScan: false,
+      // Guards dispatched by the DISPATCH skill: [{x,y,quadrant,life}].
+      // `life` counts down each round; at 0 they're recalled (removed).
+      guards: [],
       // Turns remaining before each skill is usable again; 0 === ready.
       skills: Object.keys(SKILL_INFO).reduce((m, k) => ((m[k] = 0), m), {}),
     },
@@ -599,6 +607,26 @@ export function useSkill(game, skill, arg) {
     return { ok: true, event: "echo", refreshed: game.noise.length };
   }
 
+  if (skill === SKILLS.DISPATCH) {
+    // arg is a quadrant index 0-3 (N/E/S/W), same convention as facing/bluff.
+    if (!Number.isInteger(arg) || arg < 0 || arg > 3) return { ok: false, reason: "no-quadrant" };
+    const post = game.map.guardPosts[arg];
+    // Stable per-guard id so the renderer can track a mesh across moves
+    // instead of re-keying by position (which changes every round).
+    const w = game.watcher;
+    w._guardSeq = (w._guardSeq || 0) + 1;
+    const id1 = w._guardSeq;
+    w._guardSeq += 1;
+    const id2 = w._guardSeq;
+    game.watcher.guards.push(
+      { id: id1, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN },
+      { id: id2, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN }
+    );
+    spend();
+    logMsg(game, `Guards dispatched to the ${DIRS[arg]} quadrant.`);
+    return { ok: true, event: "dispatch", quadrant: arg };
+  }
+
   if (skill === SKILLS.LOCK) {
     // arg is {x,y} of an open door.
     const x = arg && arg.x;
@@ -620,6 +648,48 @@ export function useSkill(game, skill, arg) {
   }
 
   return { ok: false, reason: "unknown-skill" };
+}
+
+function quadrantOf(game, x, y) {
+  const { center } = game.map;
+  const dx = x - center.x, dy = y - center.y;
+  if (dx === 0 && dy === 0) return 0;
+  if (Math.abs(dy) >= Math.abs(dx)) return dy < 0 ? 0 : 2;
+  return dx > 0 ? 1 : 3;
+}
+
+// Advance every dispatched guard one round: chase the freshest noise inside
+// its assigned quadrant at GUARD_SPEED tiles/turn, capture on same-tile
+// contact with a live prisoner, and recall guards whose life ran out without
+// finding anyone (the DISPATCH skill's "miss" cost is the spent cooldown,
+// nothing more — a whiff doesn't strand a permanent hazard on the map).
+export function moveGuards(game) {
+  const w = game.watcher;
+  for (const guard of w.guards) {
+    guard.life -= 1;
+    let target = null, bestTtl = -1;
+    for (const n of game.noise) {
+      if (quadrantOf(game, n.x, n.y) !== guard.quadrant) continue;
+      if (n.ttl > bestTtl) { bestTtl = n.ttl; target = n; }
+    }
+    if (target) {
+      const path = bfsPath(game.map, guard.x, guard.y, target.x, target.y, null);
+      if (path && path.length > 1) {
+        const steps = Math.min(GUARD_SPEED, path.length - 1);
+        guard.x = path[steps].x;
+        guard.y = path[steps].y;
+      }
+    }
+    for (const p of game.prisoners) {
+      if (!p.alive || p.escaped) continue;
+      if (p.x === guard.x && p.y === guard.y) {
+        p.alive = false;
+        logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
+      }
+    }
+  }
+  w.guards = w.guards.filter((g) => g.life > 0);
+  checkEndConditions(game);
 }
 
 export function setBluff(game, dir) {
@@ -694,6 +764,7 @@ export function endWatcherTurn(game) {
   game.watcher.bluff = null;
   game.watcher.bluff2 = null;
   game.watcher.wideScan = false; // armed for exactly one scan
+  if (game.watcher.guards.length) moveGuards(game);
   // Tick every skill cooldown down one Watcher turn.
   for (const k of Object.keys(game.watcher.skills)) {
     if (game.watcher.skills[k] > 0) game.watcher.skills[k] -= 1;
