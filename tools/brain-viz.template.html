@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Opticon — the archive watches itself</title>
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(14, 18, 30, 0.86);
+    --panel-solid: #0e121e;
+    --prisoner: #5ad4e6;
+    --watcher: #ff6b7a;
+    --exit: #59f7a6;
+    --idea: #ffb020;
+    --text: #dfe8f7;
+    --muted: #8595b0;
+    --line: rgba(120, 150, 200, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: radial-gradient(ellipse at 50% 40%, #0a0f1c 0%, var(--bg) 65%);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  header { text-align: center; padding: 28px 16px 8px; }
+  header h1 {
+    margin: 0; font-size: 26px; letter-spacing: .12em; font-weight: 700;
+    color: var(--prisoner); text-shadow: 0 0 18px rgba(90, 212, 230, .35);
+  }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .stage { display: flex; justify-content: center; padding: 8px 16px 40px; }
+  svg { max-width: 920px; width: 100%; height: auto; overflow: visible; }
+  .ring-guide { fill: none; stroke: var(--line); stroke-width: 1; }
+  .sweep { transform-origin: 450px 450px; animation: spin 22s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tower-body { fill: var(--panel-solid); stroke: var(--prisoner); stroke-width: 2; }
+  .tower-iris { fill: none; stroke: var(--prisoner); stroke-width: 2; opacity: .8; }
+  .tower-pupil { fill: var(--watcher); }
+  .node { cursor: pointer; transition: r .12s ease, opacity .12s ease; }
+  .node:hover, .node.pinned { filter: drop-shadow(0 0 6px currentColor); }
+  .arc { cursor: pointer; transition: opacity .12s ease; }
+  .arc:hover, .arc.pinned { opacity: 1 !important; filter: drop-shadow(0 0 6px currentColor); }
+  .ring-label { fill: var(--muted); font-size: 11px; letter-spacing: .08em; }
+  #tip {
+    position: fixed; max-width: 320px; pointer-events: none; z-index: 10;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); opacity: 0; transition: opacity .1s ease;
+    backdrop-filter: blur(6px);
+  }
+  #tip.show { opacity: 1; }
+  #tip .tt { font-weight: 700; margin-bottom: 4px; }
+  #tip .tk { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .legend {
+    display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
+    padding: 0 16px 30px; font-size: 12px; color: var(--muted);
+  }
+  .legend .item { display: flex; align-items: center; gap: 7px; }
+  .swatch { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 0 16px 30px; opacity: .7; }
+  footer code { color: var(--prisoner); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>OPTICON</h1>
+    <p id="subtitle">the archive watches itself</p>
+  </header>
+  <div class="stage"><svg id="viz" viewBox="0 0 900 900" role="img" aria-label="Radial view of Opticon's Brain-linked memory, tensions, and ideas"></svg></div>
+  <div class="legend" id="legend"></div>
+  <footer>
+    generated <span id="gendate"></span> · regenerate with <code>node tools/brain-viz.mjs</code>
+    · inner ring: tensions (red=open, amber=leaning, green=resolved) · middle ring: memory lessons · outer ring: idea kernels
+  </footer>
+  <div id="tip"></div>
+
+<script>
+const DATA = /*__DATA__*/;
+
+const CX = 450, CY = 450;
+const R_TENSION = 150;
+const R_MEMORY = 260;
+const R_IDEA = 360;
+
+const STATUS_COLOR = { open: "#ff6b7a", leaning: "#ffb020", resolved: "#59f7a6" };
+const TAG_PALETTE = {
+  gamedesign: "#5ad4e6", ai: "#b18cff", testing: "#ffd166", devops: "#8595b0",
+  gamedev: "#5ad4e6", determinism: "#ff9f5a", state: "#7ee787", cutscene: "#f778ba",
+  browser: "#5ad4e6", input: "#ffd166", rendering: "#b18cff", balance: "#59f7a6",
+};
+function tagColor(tags) {
+  for (const t of tags) if (TAG_PALETTE[t]) return TAG_PALETTE[t];
+  return "#dfe8f7";
+}
+
+const svg = document.getElementById("viz");
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function polar(r, deg) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+}
+
+// ---- Guide rings + slow gaze sweep (echoes the game's own 90deg wedge) ---
+for (const r of [R_TENSION, R_MEMORY, R_IDEA]) {
+  svg.appendChild(el("circle", { class: "ring-guide", cx: CX, cy: CY, r }));
+}
+{
+  const sweep = el("g", { class: "sweep" });
+  const [x1, y1] = polar(R_IDEA + 20, -45);
+  const [x2, y2] = polar(R_IDEA + 20, 45);
+  const path = el("path", {
+    d: `M ${CX} ${CY} L ${x1} ${y1} A ${R_IDEA + 20} ${R_IDEA + 20} 0 0 1 ${x2} ${y2} Z`,
+    fill: "url(#gazeGrad)",
+  });
+  const defs = el("defs", {});
+  const grad = el("radialGradient", { id: "gazeGrad" });
+  grad.appendChild(el("stop", { offset: "0%", "stop-color": "#5ad4e6", "stop-opacity": "0.10" }));
+  grad.appendChild(el("stop", { offset: "100%", "stop-color": "#5ad4e6", "stop-opacity": "0" }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+  sweep.appendChild(path);
+  svg.appendChild(sweep);
+}
+
+// ---- Tower at the center ---------------------------------------------------
+svg.appendChild(el("circle", { class: "tower-body", cx: CX, cy: CY, r: 56 }));
+svg.appendChild(el("circle", { class: "tower-iris", cx: CX, cy: CY, r: 34 }));
+svg.appendChild(el("circle", { class: "tower-pupil", cx: CX, cy: CY, r: 11 }));
+
+// ---- Tooltip ---------------------------------------------------------------
+const tip = document.getElementById("tip");
+let pinned = null;
+function showTip(evt, html) {
+  tip.innerHTML = html;
+  tip.classList.add("show");
+  moveTip(evt);
+}
+function moveTip(evt) {
+  const pad = 16;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + 330 > window.innerWidth) x = evt.clientX - 330 - pad;
+  if (y + 160 > window.innerHeight) y = evt.clientY - 160 - pad;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+function hideTip() {
+  if (pinned) return;
+  tip.classList.remove("show");
+}
+document.addEventListener("mousemove", (e) => { if (tip.classList.contains("show")) moveTip(e); });
+
+// ---- Tensions: arc segments on the inner ring ------------------------------
+{
+  const n = DATA.tensions.length || 1;
+  const gapDeg = 4;
+  const span = 360 / n - gapDeg;
+  DATA.tensions.forEach((t, i) => {
+    const start = i * (360 / n) + gapDeg / 2;
+    const end = start + span;
+    const [x1, y1] = polar(R_TENSION, start);
+    const [x2, y2] = polar(R_TENSION, end);
+    const large = span > 180 ? 1 : 0;
+    const path = el("path", {
+      class: "arc",
+      d: `M ${x1} ${y1} A ${R_TENSION} ${R_TENSION} 0 ${large} 1 ${x2} ${y2}`,
+      fill: "none",
+      stroke: STATUS_COLOR[t.status] || "#ff6b7a",
+      "stroke-width": 14,
+      "stroke-linecap": "round",
+      opacity: 0.85,
+      style: "color:" + (STATUS_COLOR[t.status] || "#ff6b7a"),
+    });
+    const tooltip = `<div class="tt">${t.id} · ${t.kind}</div><div>${t.title}</div>
+      <div class="tk" style="margin-top:6px">${t.statusText}</div>
+      <div style="margin-top:4px">${t.summary}</div>`;
+    path.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    path.addEventListener("mouseleave", hideTip);
+    path.addEventListener("click", () => togglePin(path, tooltip));
+    svg.appendChild(path);
+  });
+}
+
+// ---- Memory: dots on the middle ring, chronological by id ------------------
+{
+  const n = DATA.memory.length || 1;
+  DATA.memory.forEach((m, i) => {
+    const deg = (i / n) * 360;
+    const [x, y] = polar(R_MEMORY, deg);
+    const color = tagColor(m.tags);
+    const dot = el("circle", {
+      class: "node", cx: x, cy: y, r: 6, fill: color, stroke: "#05070d",
+      "stroke-width": 1.5, style: "color:" + color,
+    });
+    const tooltip = `<div class="tt">${m.id} · ${m.title}</div>
+      <div class="tk">${m.date}${m.verified ? " · verified" : " · assumed"} · ${m.tags.map((t) => "[" + t + "]").join("")}</div>
+      <div style="margin-top:4px">${m.what}</div>
+      ${m.rule ? '<div style="margin-top:6px;color:#8595b0"><i>' + m.rule + "</i></div>" : ""}`;
+    dot.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    dot.addEventListener("mouseleave", hideTip);
+    dot.addEventListener("click", () => togglePin(dot, tooltip));
+    svg.appendChild(dot);
+  });
+}
+
+// ---- Ideas: hollow dots on the outer ring, dormant kernels -----------------
+{
+  const n = DATA.ideas.length || 1;
+  DATA.ideas.forEach((k, i) => {
+    const deg = (i / n) * 360 + 360 / (n * 2);
+    const [x, y] = polar(R_IDEA, deg);
+    const dot = el("circle", {
+      class: "node", cx: x, cy: y, r: 7, fill: "rgba(255,176,32,0.12)",
+      stroke: "var(--idea)", "stroke-width": 1.5, "stroke-dasharray": "2 2",
+      style: "color: var(--idea)",
+    });
+    const tooltip = `<div class="tt">${k.title}</div>
+      <div class="tk">${k.domain} · ${k.slug}</div>
+      <div style="margin-top:4px">${k.summary}</div>`;
+    dot.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    dot.addEventListener("mouseleave", hideTip);
+    dot.addEventListener("click", () => togglePin(dot, tooltip));
+    svg.appendChild(dot);
+  });
+}
+
+function togglePin(node, html) {
+  if (pinned === node) {
+    node.classList.remove("pinned");
+    pinned = null;
+    tip.classList.remove("show");
+    return;
+  }
+  if (pinned) pinned.classList.remove("pinned");
+  pinned = node;
+  node.classList.add("pinned");
+  tip.innerHTML = html;
+  tip.classList.add("show");
+}
+
+// ---- Ring labels ------------------------------------------------------------
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_TENSION - 8, "text-anchor": "middle" }); t.textContent = "tensions"; return t; })());
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_MEMORY - 8, "text-anchor": "middle" }); t.textContent = "memory"; return t; })());
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_IDEA - 8, "text-anchor": "middle" }); t.textContent = "ideas"; return t; })());
+
+// ---- Legend + header ---------------------------------------------------------
+document.getElementById("gendate").textContent = DATA.generated;
+document.getElementById("subtitle").textContent =
+  `${DATA.memory.length} lessons · ${DATA.tensions.length} tensions · ${DATA.ideas.length} idea kernels`;
+const legend = document.getElementById("legend");
+const legendItems = [
+  ["open tension", STATUS_COLOR.open],
+  ["leaning", STATUS_COLOR.leaning],
+  ["resolved", STATUS_COLOR.resolved],
+  ["memory (by tag)", "#dfe8f7"],
+  ["idea kernel", "var(--idea)"],
+];
+for (const [label, color] of legendItems) {
+  const item = document.createElement("div");
+  item.className = "item";
+  item.innerHTML = `<span class="swatch" style="background:${color}"></span>${label}`;
+  legend.appendChild(item);
+}
+</script>
+</body>
+</html>
