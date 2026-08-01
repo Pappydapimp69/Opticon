@@ -23,4 +23,7 @@ echo
 echo "== zone hud (quadrant readout + watcher position-leak gate) =="
 node tests/zone-hud.mjs
 echo
+echo "== turn-authority hud (hint/panel track who's really acting, not just game.turn) =="
+node tests/turn-authority-hud.mjs
+echo
 echo "ALL TESTS PASSED"
