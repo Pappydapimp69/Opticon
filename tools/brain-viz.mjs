@@ -1,19 +1,24 @@
 #!/usr/bin/env node
-// brain-viz.mjs — Opticon's own view of its Brain-linked knowledge.
+// brain-viz.mjs — a from-scratch view of the ENTIRE Brain cognitive system,
+// not just this project's own slice of it: every memory lesson, tension,
+// idea kernel, and exploration entry across every linked project, from the
+// system's first recorded day to today. Styled after Opticon itself (the
+// tower, the gaze sweep, the css/style.css palette) rather than the generic
+// `brain viz` command's project-agnostic output.
 //
-// The generic `brain viz` command (see Brain/bin/brain) renders a
-// project-agnostic HTML page. This is a from-scratch alternative styled
-// after Opticon itself: a tower at the center, a slow gaze sweep, and the
-// project's memory/tension/idea entries laid out in rings around it — the
-// same visual grammar (wedges, quadrants, the cyan/red/green palette from
-// css/style.css) the game already uses to represent watching something.
+// Time IS the layout: everything is placed on one spiral running from the
+// tower (day one) out to the rim (today), so the shape of the whole archive
+// — how it grew, where it clustered, how much of it is still open — reads
+// at a glance instead of needing a legend to decode a static ring position.
 //
-// Reads directly from the linked Brain cache (never edits it) and writes
-// one self-contained static HTML file. No dependencies, no build step.
+// Reads directly from the linked Brain cache (and, for tensions, the
+// sibling Tension checkout — see the comment above `tensionSource` for
+// why). Never edits either. No dependencies, no build step.
 //
 // Run: node tools/brain-viz.mjs [--out docs/brain-viz.html]
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,14 +42,38 @@ function readIfExists(p) {
   }
 }
 
-// ---- Memory: .brain/memory/projects/pappydapimp69__opticon.md ------------
-// Format (see .brain/memory/incoming/TEMPLATE.md):
-//   ## E<id> — <title>
-//   - Date: YYYY-MM-DD
-//   - Tags: [a][b][c]
-//   - What: ...
-//   - ... more "- Field: value" lines ...
-function parseMemory(text) {
+// Most entries (memory) carry their own `- Date:` field. Tensions,
+// exploration, and idea kernels don't — they're free-form prose files with
+// no per-entry timestamp — so their date is instead the date the header
+// LINE was introduced, via `git blame`. One blame call per file (not per
+// entry) keeps this cheap even at hundreds of entries.
+function blameDatesByLine(filePath) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  try {
+    const out = execFileSync("git", ["blame", "--date=short", "-e", base], {
+      cwd: dir,
+      maxBuffer: 64 * 1024 * 1024,
+    }).toString("utf8");
+    const dates = [];
+    for (const line of out.split("\n")) {
+      const m = line.match(/(\d{4}-\d{2}-\d{2})\s+\d+\)/);
+      dates.push(m ? m[1] : null);
+    }
+    return dates; // dates[0] is line 1, etc.
+  } catch {
+    return [];
+  }
+}
+function dateAtLine(blame, lineNum) {
+  return blame[lineNum - 1] || null;
+}
+function lineNumberOf(text, index) {
+  return text.slice(0, index).split("\n").length;
+}
+
+// ---- Memory: every file under <cache>/memory/projects/ --------------------
+function parseMemoryFile(text, fallbackProject) {
   const chunks = text.split(/\n(?=## E\d+)/);
   const entries = [];
   for (const chunk of chunks) {
@@ -57,34 +86,72 @@ function parseMemory(text) {
     }
     const tags = [...(fields.tags || "").matchAll(/\[([\w-]+)\]/g)].map((m) => m[1]);
     entries.push({
+      kind: "memory",
       id: header[1],
       title: header[2].trim(),
       date: fields.date || "",
+      project: fields.project || fallbackProject,
       tags,
       what: fields.what || "",
       rule: fields["rule of thumb"] || "",
       verified: /^verified/i.test(fields["provenance (verified/assumed)"] || ""),
     });
   }
-  entries.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   return entries;
 }
 
-// ---- Tensions: Tension/tension-ledger.md, the Opticon section only -------
-// Section boundaries are the ledger's own "## Project: X" headers — more
-// reliable than keyword-matching prose (which is exactly the false-positive
-// failure mode Tension T27, filed this same session, is about).
-function parseTensions(text) {
-  const start = text.indexOf("## Project: Opticon");
-  if (start === -1) return [];
-  const nextSection = text.indexOf("\n## ", start + 1);
-  const section = nextSection === -1 ? text.slice(start) : text.slice(start, nextSection);
-  const chunks = section.split(/\n(?=### T\d)/);
+function parseAllMemory(cache) {
+  const dir = path.join(cache, "memory", "projects");
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+  } catch {
+    return [];
+  }
+  const all = [];
+  for (const f of files) {
+    const fallback = f.replace(/\.md$/, "").replace(/__/g, "/");
+    all.push(...parseMemoryFile(readIfExists(path.join(dir, f)), fallback));
+  }
+  return all;
+}
+
+// ---- Tensions: the whole ledger, sectioned by "## Project: X" -------------
+// Tensions have no promote-to-main step the way memory/ideas do (their
+// steward pushes straight to main regardless of source branch); a tension
+// edited on a feature branch just sits there until someone opens and merges
+// a PR for the Tension repo specifically, which nothing in this workflow
+// ever does. Discovered this building the Opticon-only version of this
+// script: `brain update` reported success but the canon cache stayed on an
+// old T25 and never saw T27. There's no fixing that for every OTHER
+// project's tensions from here — this session only has this project's own
+// checkouts — so the honest move is: read canon as the base (best available
+// for everything this session didn't touch), then overlay this project's
+// own section from its own sibling checkout, which is verifiably current.
+function parseTensionsFromLedger(text, blame) {
   const entries = [];
+  let project = null;
+  const sectionRe = /^## Project: (.+)$/gm;
+  const sections = [];
+  let m;
+  while ((m = sectionRe.exec(text))) sections.push({ index: m.index, name: m[1].trim() });
+  function projectAt(index) {
+    let name = null;
+    for (const s of sections) {
+      if (s.index <= index) name = s.name;
+      else break;
+    }
+    return name;
+  }
+  const chunks = text.split(/\n(?=### T)/);
+  let cursor = 0;
   for (const chunk of chunks) {
-    const header = chunk.match(/^### T(\d+) · ([\w-]+) · (.+)$/m);
+    const idx = text.indexOf(chunk, cursor);
+    cursor = idx + chunk.length;
+    const header = chunk.match(/^### (T[\w-]+(?: recurrence)?) · ([\w-]+) · (.+)$/m);
     if (!header) continue;
-    const [, num, kind, rest] = header;
+    const [, id, kind, rest] = header;
+    project = projectAt(idx);
     const markerMatch = rest.match(/[✅🔴🟡🟢]/u);
     let title = rest;
     let statusText = "";
@@ -101,36 +168,36 @@ function parseTensions(text) {
     const bodyEnd = chunk.search(/\n(Poles:|Lean:|Updates:|Source:)/);
     const body = (bodyEnd === -1 ? chunk : chunk.slice(0, bodyEnd))
       .split("\n")
-      .slice(1) // drop the header line itself
+      .slice(1)
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
 
+    const headerLine = lineNumberOf(text, idx) + chunk.slice(0, chunk.indexOf(header[0])).split("\n").length - 1;
     entries.push({
-      id: `T${num}`,
-      kind,
+      kind: "tension",
+      id,
       title,
       status,
-      statusText: statusText || (status === "open" ? "open" : status),
+      statusText: statusText || status,
+      project: project || "Brain",
+      date: dateAtLine(blame, lineNumberOf(text, idx)),
       summary: body.length > 320 ? body.slice(0, 317) + "…" : body,
     });
   }
-  entries.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
   return entries;
 }
 
-// ---- Ideas: ideas/idea-repository.md, kernels that cite Opticon ----------
-// Header: "## [DOMAIN / subdomain / slug / detail]". Idea kernels have no
-// per-project field the way memory entries do, so inclusion is "the kernel
-// mentions Opticon anywhere" — a false positive here just decorates one
-// extra dot rather than blocking a commit, so the bar is lower than T27's.
-function parseIdeas(text) {
+// ---- Ideas: kernels, no per-entry project field ----------------------------
+function parseIdeas(text, blame) {
   const chunks = text.split(/\n(?=## \[)/);
   const entries = [];
+  let cursor = 0;
   for (const chunk of chunks) {
     const header = chunk.match(/^## \[(.+)\]\s*$/m);
     if (!header) continue;
-    if (!/opticon/i.test(chunk)) continue;
+    const idx = text.indexOf(chunk, cursor);
+    cursor = idx + chunk.length;
     const parts = header[1].split("/").map((s) => s.trim());
     const sourceLine = chunk.match(/^Source: (.+)$/m);
     const bodyEnd = chunk.search(/\n(Source:)/);
@@ -142,51 +209,134 @@ function parseIdeas(text) {
       .replace(/\s+/g, " ")
       .trim();
     entries.push({
+      kind: "idea",
+      id: parts[2] || parts[1] || parts[0],
       domain: parts[0] || "SYSTEM",
-      slug: parts[2] || parts[1] || parts[0],
       title: parts[parts.length - 1] || parts[0],
+      project: sourceLine ? sourceLine[1].trim().split(/[ ,]/)[0] : null,
       summary: body.length > 300 ? body.slice(0, 297) + "…" : body,
-      source: sourceLine ? sourceLine[1].trim() : "",
+      date: dateAtLine(blame, lineNumberOf(text, idx)),
     });
   }
   return entries;
 }
 
-const cache = cachePath();
-const memory = parseMemory(readIfExists(path.join(cache, "memory", "projects", "pappydapimp69__opticon.md")));
-
-// Tensions come from the sibling Tension checkout, NOT the Brain cache, if
-// it's available. Discovered building this: the tension ledger has no
-// promote-to-main step the way memory/ideas do (their steward pushes
-// straight to main regardless of which branch triggered `brain sync`) — a
-// tension edited and pushed to a feature branch, as this whole session's
-// work on T25/T27 was, sits there until someone opens and merges a PR for
-// the Tension repo specifically, which nothing in this workflow ever does.
-// `brain update` reported success but the cache stayed on an old T25 and
-// never saw T27 at all. Preferring the actual working copy sidesteps that
-// gap rather than rendering a visualization that contradicts what was just
-// shipped this session.
-const siblingLedger = path.join(REPO_ROOT, "..", "Tension", "tension-ledger.md");
-const ledgerPath = fs.existsSync(siblingLedger) ? siblingLedger : path.join(cache, "Tension", "tension-ledger.md");
-const tensions = parseTensions(readIfExists(ledgerPath));
-
-const ideas = parseIdeas(readIfExists(path.join(cache, "ideas", "idea-repository.md")));
-
-if (!memory.length && !tensions.length && !ideas.length) {
-  console.error(`No data found under Brain cache "${cache}" — is this project linked (\`brain link\`)?`);
-  process.exit(1);
+// ---- Exploration: same "## Project: X" sectioning as tensions -------------
+function parseExploration(text, blame) {
+  const entries = [];
+  const sectionRe = /^## Project: (.+)$/gm;
+  const sections = [];
+  let m;
+  while ((m = sectionRe.exec(text))) sections.push({ index: m.index, name: m[1].trim() });
+  function projectAt(index) {
+    let name = null;
+    for (const s of sections) {
+      if (s.index <= index) name = s.name;
+      else break;
+    }
+    return name;
+  }
+  const chunks = text.split(/\n(?=### )/);
+  let cursor = 0;
+  for (const chunk of chunks) {
+    const idx = text.indexOf(chunk, cursor);
+    cursor = idx + chunk.length;
+    const header = chunk.match(/^### ([\w-]+) · (experiment|synthesis|speculation) · (.+?) · \*\*([^*]+)\*\*/m);
+    if (!header) continue;
+    const [, id, type, title, state] = header;
+    const bodyEnd = chunk.search(/\n\n/);
+    const body = (bodyEnd === -1 ? chunk : chunk.slice(0, bodyEnd))
+      .split("\n")
+      .slice(1)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    entries.push({
+      kind: "exploration",
+      id,
+      type,
+      title: title.trim(),
+      state: state.trim(),
+      project: projectAt(idx) || "Brain",
+      summary: body.length > 300 ? body.slice(0, 297) + "…" : body,
+      date: dateAtLine(blame, lineNumberOf(text, idx)),
+    });
+  }
+  return entries;
 }
 
-const data = { memory, tensions, ideas, generated: new Date().toISOString().slice(0, 10) };
+// ---- Assemble ---------------------------------------------------------------
+const cache = cachePath();
+
+const memory = parseAllMemory(cache);
+
+const canonLedgerPath = path.join(cache, "Tension", "tension-ledger.md");
+const canonLedgerText = readIfExists(canonLedgerPath);
+const canonTensions = parseTensionsFromLedger(canonLedgerText, blameDatesByLine(canonLedgerPath));
+
+const siblingLedgerPath = path.join(REPO_ROOT, "..", "Tension", "tension-ledger.md");
+let tensions = canonTensions;
+if (fs.existsSync(siblingLedgerPath)) {
+  const siblingText = readIfExists(siblingLedgerPath);
+  const siblingAll = parseTensionsFromLedger(siblingText, blameDatesByLine(siblingLedgerPath));
+  const siblingOpticon = siblingAll.filter((t) => /opticon/i.test(t.project || ""));
+  const overrideIds = new Set(siblingOpticon.map((t) => t.id));
+  tensions = canonTensions.filter((t) => !overrideIds.has(t.id)).concat(siblingOpticon);
+}
+
+const ideasPath = path.join(cache, "ideas", "idea-repository.md");
+const ideas = parseIdeas(readIfExists(ideasPath), blameDatesByLine(ideasPath));
+
+const explorationPath = path.join(cache, "ideas", "exploration.md");
+const exploration = parseExploration(readIfExists(explorationPath), blameDatesByLine(explorationPath));
+
+const combined = [...memory, ...tensions, ...ideas, ...exploration];
+const all = combined.filter((e) => e.date);
+const omitted = combined.length - all.length;
+if (!all.length) {
+  console.error(`No dated entries found under Brain cache "${cache}" — is this project linked (\`brain link\`)?`);
+  process.exit(1);
+}
+// A few canon entries are missing their own Date field (or, in one case, an
+// entirely empty body — pappydapimp69__opticon.md#E28) — real data-quality
+// gaps in the shared corpus, not something to paper over by hand-editing
+// canon. Nothing time-based can place them, so they're dropped from the
+// spiral; `omitted` says so on the page instead of silently under-counting.
+if (omitted) console.log(`(${omitted} entries had no usable date and were omitted from the spiral)`);
+
+const projects = [...new Set(all.map((e) => e.project).filter(Boolean))].sort();
+const dates = all.map((e) => e.date).sort();
+const countOf = (kind) => all.filter((e) => e.kind === kind).length;
+const data = {
+  entries: all,
+  projects,
+  minDate: dates[0],
+  maxDate: dates[dates.length - 1],
+  generated: new Date().toISOString().slice(0, 10),
+  counts: { memory: countOf("memory"), tension: countOf("tension"), idea: countOf("idea"), exploration: countOf("exploration") },
+  omitted,
+};
+
+if (process.env.BRAIN_VIZ_DEBUG_DATA) fs.writeFileSync(process.env.BRAIN_VIZ_DEBUG_DATA, JSON.stringify(data));
 
 // ---- Render ---------------------------------------------------------------
 const TEMPLATE = fs.readFileSync(path.join(__dirname, "brain-viz.template.html"), "utf8");
-const html = TEMPLATE.replace("/*__DATA__*/", JSON.stringify(data));
+// A function replacer, NOT a string one: String.replace(pattern, str) treats
+// $&/$`/$'/$$ in `str` as special substitution tokens, and the corpus is
+// large enough to contain them by accident — e.g. an idea entry discussing
+// the regex `(a+)+$` followed by a markdown code-span backtick produces the
+// literal substring "$`", which means "insert everything before the match"
+// and spliced this whole template's own <head> into the middle of a JSON
+// string when passed as a plain string replacement. A function's return
+// value is inserted verbatim, with no token interpretation.
+const html = TEMPLATE.replace("/*__DATA__*/", () => JSON.stringify(data));
 
 const outArg = process.argv.indexOf("--out");
 const outPath = path.resolve(REPO_ROOT, outArg !== -1 ? process.argv[outArg + 1] : "docs/brain-viz.html");
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, html);
 console.log(
-  `wrote ${path.relative(REPO_ROOT, outPath)} — ${memory.length} memory, ${tensions.length} tensions, ${ideas.length} ideas`
+  `wrote ${path.relative(REPO_ROOT, outPath)} — ${all.length} entries ` +
+    `(${data.counts.memory} memory, ${data.counts.tension} tensions, ${data.counts.idea} ideas, ${data.counts.exploration} exploration) ` +
+    `across ${projects.length} projects, ${data.minDate} -> ${data.maxDate}`
 );
