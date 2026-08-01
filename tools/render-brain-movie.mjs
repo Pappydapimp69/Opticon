@@ -97,12 +97,18 @@ function vttTimestamp(seconds) {
 
   const canvas = await page.$("#c");
   const t0 = Date.now();
+  // The poster is a still someone sees before pressing play, not a frame
+  // that has to exist mid-sequence — frame 0 is mid-fade-in-from-black by
+  // design (every scene starts that way), so it makes a black square.
+  // Grab the moment 2s into the movie instead, near where the title
+  // card's own logo/text fade has settled.
+  const posterFrame = Math.min(totalFrames - 1, Math.round(2 * config.fps));
   for (let i = 0; i < totalFrames; i++) {
     const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
     await page.evaluate((p) => window.renderFrame(p), progress);
     const framePath = path.join(framesDir, `frame_${String(i).padStart(5, "0")}.png`);
     await canvas.screenshot({ path: framePath });
-    if (i === 0) fs.copyFileSync(framePath, posterPath);
+    if (i === posterFrame) fs.copyFileSync(framePath, posterPath);
     if (i % 100 === 0 || i === totalFrames - 1) {
       process.stdout.write(`\r  frame ${i + 1}/${totalFrames}`);
     }
@@ -110,12 +116,15 @@ function vttTimestamp(seconds) {
   process.stdout.write("\n");
   console.log(`frames captured in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-  // ---- Captions (WebVTT) — same warp table the frames used, so the text
-  // lines up with what's actually on screen at that timestamp.
+  // ---- Captions (WebVTT) — one per scene, running for that scene's whole
+  // duration (unlike the earlier spiral version, these are few and
+  // well-separated, so there's no need to cap a caption short to avoid
+  // colliding with the next one).
   const beats = await page.evaluate(() => window.getBeatsTiming());
+  const durationS = config.durationMs / 1000;
   const vttLines = ["WEBVTT", ""];
   beats.forEach((b, i) => {
-    const end = i < beats.length - 1 ? Math.min(beats[i + 1].seconds, b.seconds + 5) : b.seconds + 5;
+    const end = i < beats.length - 1 ? beats[i + 1].seconds : durationS;
     vttLines.push(String(i + 1), `${vttTimestamp(b.seconds)} --> ${vttTimestamp(Math.max(end, b.seconds + 1))}`, b.caption, "");
   });
   fs.writeFileSync(vttPath, vttLines.join("\n"));
