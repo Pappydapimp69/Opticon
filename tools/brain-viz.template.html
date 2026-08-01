@@ -31,6 +31,20 @@
     color: var(--prisoner); text-shadow: 0 0 18px rgba(90, 212, 230, .35);
   }
   header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  /* The movie is a real, pre-rendered video file (see render-brain-movie.mjs)
+     — a plain <video> here costs nothing beyond hardware decode once played,
+     and nothing at all until then (preload="metadata" only). An earlier
+     version drove the same animation live in the DOM (1100+ SVG nodes,
+     per-frame viewBox mutation, simultaneous keyframe animations with
+     drop-shadow filters) and that was genuinely heavy — reported as "very
+     demanding on the processor." Baking it to video moves that cost to
+     build time, once, instead of to every viewer's browser, every time. */
+  .movie-wrap { display: flex; justify-content: center; padding: 10px 16px 6px; }
+  video {
+    max-width: 720px; width: 100%; border-radius: 10px; background: #000;
+    border: 1px solid var(--line);
+  }
+  .movie-caption { text-align: center; color: var(--muted); font-size: 12px; padding: 0 16px 10px; }
   .toolbar {
     display: flex; gap: 14px; justify-content: center; align-items: center;
     flex-wrap: wrap; padding: 14px 16px 4px;
@@ -86,8 +100,12 @@
   .hide-tension .k-tension { display: none; }
   .hide-idea .k-idea { display: none; }
   .hide-exploration .k-exploration { display: none; }
+  /* The one piece of continuous motion left on this page: a single
+     GPU-composited rotation of a gradient wedge, no repaint/layout per
+     frame. Kept because it's cheap; still respects reduced-motion. */
   .sweep { transform-origin: 500px 500px; animation: spin 30s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .sweep { animation: none; } }
   .tower-body { fill: var(--panel-solid); stroke: var(--prisoner); stroke-width: 2; }
   .tower-iris { fill: none; stroke: var(--prisoner); stroke-width: 2; opacity: .8; }
   .tower-pupil { fill: var(--watcher); }
@@ -133,6 +151,18 @@
     <h1>OPTICON</h1>
     <p id="subtitle">the archive watches itself</p>
   </header>
+  <div class="movie-wrap">
+    <video controls preload="metadata" playsinline poster="brain-viz-poster.png">
+      <source src="brain-viz-movie.webm" type="video/webm" />
+      <source src="brain-viz-movie.mp4" type="video/mp4" />
+      <track kind="captions" src="brain-viz-movie.vtt" srclang="en" label="Beats" default />
+      Your browser doesn't support video playback — use the explorer below instead.
+    </video>
+  </div>
+  <p class="movie-caption">
+    the whole archive, day one to today, narrated by its own tensions — pre-rendered, not simulated live
+    (regenerate with <code>node tools/render-brain-movie.mjs</code>)
+  </p>
   <div class="toolbar">
     <input id="filter" type="text" placeholder="filter by project…" autocomplete="off" />
     <div class="legend" id="legend"></div>
@@ -147,7 +177,7 @@
     <div id="caption" class="caption"></div>
   </div>
   <footer>
-    generated <span id="gendate"></span> · regenerate with <code>node tools/brain-viz.mjs</code>
+    generated <span id="gendate"></span> · regenerate this explorer with <code>node tools/brain-viz.mjs</code>
     · one spiral turn ≈ one span of time, day one at the tower, today at the rim · click a legend swatch to hide a type
   </footer>
   <div id="tip"></div>

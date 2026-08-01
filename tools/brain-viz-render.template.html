@@ -1,0 +1,333 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body style="margin:0;background:#05070d">
+<canvas id="c" width="900" height="900"></canvas>
+<script>
+// brain-viz-render.template.html — the OFFLINE frame renderer. Never shipped
+// to viewers; render-brain-movie.mjs drives this page frame-by-frame (via
+// window.renderFrame(progress)) and screenshots the canvas into a PNG
+// sequence, which ffmpeg then encodes into the actual video file viewers
+// get. All the animation math (spiral placement, the semantic-anchor beat
+// warp, camera clamping) is IDENTICAL to brain-viz.template.html's, just
+// driven by a deterministic frame loop instead of requestAnimationFrame —
+// see that file and render-brain-movie.mjs for why this moved offline.
+const DATA = /*__DATA__*/;
+
+window.MOVIE_CONFIG = { width: 900, height: 900, fps: 30, durationMs: 42000 };
+
+const CX = 500, CY = 500;
+const R_MIN = 85, R_MAX = 460;
+const STATUS_COLOR = { open: "#ff6b7a", leaning: "#ffb020", resolved: "#59f7a6" };
+const STATE_COLOR = { live: "#b18cff", spent: "#55607a" };
+function stateColor(state) { return /promoted/i.test(state) ? "#7ee787" : (STATE_COLOR[state] || "#b18cff"); }
+const TAG_PALETTE = {
+  gamedesign: "#5ad4e6", ai: "#b18cff", testing: "#ffd166", devops: "#8595b0",
+  gamedev: "#5ad4e6", determinism: "#ff9f5a", state: "#7ee787", cutscene: "#f778ba",
+  browser: "#5ad4e6", input: "#ffd166", rendering: "#b18cff", balance: "#59f7a6",
+  algorithm: "#ff9f5a", algo: "#ff9f5a", process: "#8595b0", tooling: "#8595b0",
+};
+function tagColor(tags) { for (const t of tags || []) if (TAG_PALETTE[t]) return TAG_PALETTE[t]; return "#dfe8f7"; }
+
+function daysBetween(a, b) { return Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000); }
+const totalDays = Math.max(1, daysBetween(DATA.minDate, DATA.maxDate));
+const TURNS = Math.min(10, Math.max(4, totalDays / 7));
+const dayArcWidth = Math.min(60, (360 * TURNS) / totalDays);
+
+const byDate = new Map();
+for (const e of DATA.entries) {
+  if (!byDate.has(e.date)) byDate.set(e.date, []);
+  byDate.get(e.date).push(e);
+}
+function polar(r, deg) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+}
+const entries = DATA.entries.map((e) => {
+  const dayList = byDate.get(e.date);
+  const t = daysBetween(DATA.minDate, e.date) / totalDays;
+  const within = dayList.length > 1 ? (dayList.indexOf(e) + 0.5) / dayList.length - 0.5 : 0;
+  const angle = t * TURNS * 360 + within * dayArcWidth;
+  const radius = R_MIN + t * (R_MAX - R_MIN);
+  const [x, y] = polar(radius, angle);
+  return { e, t, dayIndex: daysBetween(DATA.minDate, e.date), x, y, revealFrame: -1 };
+});
+entries.sort((a, b) => a.dayIndex - b.dayIndex);
+
+// ---- Beats: identical to the live page's — every tension's own date, plus
+// the day-one/today bookends, real data only. --------------------------
+const beats = DATA.entries
+  .filter((e) => e.kind === "tension")
+  .map((e) => ({ t: daysBetween(DATA.minDate, e.date) / totalDays, caption: e.id + " " + e.status + " — " + e.title, cue: e.status }));
+beats.push({ t: 0, caption: "Day one — " + DATA.minDate + ". The archive begins.", cue: "open" });
+beats.push({ t: 1, caption: "Today — " + DATA.entries.length + " entries across " + DATA.projects.length + " projects.", cue: "resolved" });
+beats.sort((a, b) => a.t - b.t);
+
+// ---- Semantic-anchor warp: identical construction to the live page's. --
+const DWELL_HALF_WIDTH = Math.min(0.05, Math.max(0.006, 1.2 / totalDays));
+const MIN_SPEED = 0.15;
+function localSpeed(rawT) {
+  let speed = 1;
+  for (const b of beats) {
+    const d = Math.abs(rawT - b.t) / DWELL_HALF_WIDTH;
+    if (d < 1) speed = Math.min(speed, MIN_SPEED + (1 - MIN_SPEED) * (0.5 - 0.5 * Math.cos(d * Math.PI)));
+  }
+  return speed;
+}
+const WARP_SAMPLES = 2000;
+const warpTable = [];
+{
+  let cum = 0;
+  for (let i = 0; i <= WARP_SAMPLES; i++) {
+    const rawT = i / WARP_SAMPLES;
+    if (i > 0) cum += (1 / Math.max(MIN_SPEED, localSpeed(rawT))) / WARP_SAMPLES;
+    warpTable.push({ rawT, movieT: cum });
+  }
+  const total = warpTable[warpTable.length - 1].movieT || 1;
+  for (const row of warpTable) row.movieT /= total;
+}
+function movieProgressToRawT(p) {
+  p = Math.max(0, Math.min(1, p));
+  let lo = 0, hi = warpTable.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (warpTable[mid].movieT < p) lo = mid + 1; else hi = mid; }
+  return warpTable[lo].rawT;
+}
+function rawTToMovieProgress(rawT) {
+  let lo = 0, hi = warpTable.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (warpTable[mid].rawT < rawT) lo = mid + 1; else hi = mid; }
+  return warpTable[lo].movieT;
+}
+
+// Exposed so render-brain-movie.mjs can build the WebVTT captions and the
+// audio cue schedule from this SAME warp table — one source of truth for
+// timing instead of two scripts that could quietly drift apart.
+window.getBeatsTiming = function () {
+  const durS = window.MOVIE_CONFIG.durationMs / 1000;
+  return beats.map((b) => ({ caption: b.caption, cue: b.cue, seconds: rawTToMovieProgress(b.t) * durS }));
+};
+
+// Same three-layer drone/riser/stinger model as the live page, just
+// returned as a schedule (seconds, type, cue) instead of fired from a
+// rAF loop — render-brain-movie.mjs renders this on an OfflineAudioContext,
+// which can run FASTER than real-time since nothing here depends on a
+// live clock.
+window.getAudioSchedule = function () {
+  const durS = window.MOVIE_CONFIG.durationMs / 1000;
+  const lookahead = DWELL_HALF_WIDTH * 0.6;
+  const events = [];
+  for (const b of beats) {
+    const atS = rawTToMovieProgress(b.t) * durS;
+    if (b.t > 0) events.push({ type: "riser", seconds: Math.max(0, rawTToMovieProgress(Math.max(0, b.t - lookahead)) * durS) });
+    events.push({ type: "stinger", seconds: atS, cue: b.cue });
+  }
+  return events;
+};
+
+// ---- Canvas rendering --------------------------------------------------
+const canvas = document.getElementById("c");
+const W = window.MOVIE_CONFIG.width, H = window.MOVIE_CONFIG.height;
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext("2d");
+
+let cameraRadius = null;
+let frameCount = 0;
+const dt = 1 / window.MOVIE_CONFIG.fps;
+
+window.renderFrame = function (progress) {
+  frameCount++;
+  const rawT = movieProgressToRawT(progress);
+  const dayCursor = Math.floor(rawT * totalDays);
+
+  // Camera: clamp to the true revealed extent, smoothed exponentially —
+  // identical approach to the live page, just fed a fixed dt each call
+  // instead of a measured one, since frames are rendered in lockstep.
+  let maxR = R_MIN;
+  for (const n of entries) {
+    if (n.dayIndex > dayCursor) continue;
+    if (n.revealFrame === -1) n.revealFrame = frameCount;
+    const r = Math.hypot(n.x - CX, n.y - CY);
+    if (r > maxR) maxR = r;
+  }
+  const targetR = Math.min(500, maxR + 50);
+  cameraRadius = cameraRadius === null ? targetR : cameraRadius + (targetR - cameraRadius) * (1 - Math.exp(-4 * dt));
+
+  // World coordinates are the same 0..1000 space the SVG version used;
+  // cameraRadius is the SVG version's viewBox half-size, so map the world
+  // point (CX, CY) — always the tower, the fixed center — to the canvas
+  // center, at a scale that fits the current zoom level into the canvas.
+  const scale = W / (cameraRadius * 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#05070d";
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.setTransform(scale, 0, 0, scale, W / 2 - scale * CX, H / 2 - scale * CY);
+
+  // Guide spiral
+  ctx.strokeStyle = "rgba(120,150,200,0.14)";
+  ctx.lineWidth = 1 / scale;
+  ctx.beginPath();
+  const STEPS = 360;
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const [x, y] = polar(R_MIN + t * (R_MAX - R_MIN), t * TURNS * 360);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Gaze sweep — deterministic slow rotation tied to frame count, not
+  // wall-clock (there is no wall clock here; every frame is baked once).
+  const sweepAngle = (frameCount * 2.2) % 360;
+  const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, R_MAX + 25);
+  grad.addColorStop(0, "rgba(90,212,230,0.08)");
+  grad.addColorStop(1, "rgba(90,212,230,0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(CX, CY);
+  ctx.arc(CX, CY, R_MAX + 25, (sweepAngle - 45 - 90) * Math.PI / 180, (sweepAngle + 45 - 90) * Math.PI / 180);
+  ctx.closePath();
+  ctx.fill();
+
+  // Tower
+  ctx.fillStyle = "#0e121e"; ctx.strokeStyle = "#5ad4e6"; ctx.lineWidth = 2 / scale;
+  ctx.beginPath(); ctx.arc(CX, CY, 54, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(CX, CY, 32, 0, Math.PI * 2); ctx.globalAlpha = 0.8; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ff6b7a";
+  ctx.beginPath(); ctx.arc(CX, CY, 10, 0, Math.PI * 2); ctx.fill();
+
+  // Nodes, with a short pop-in scale/fade keyed off frames-since-reveal
+  // (garden-viz#E8/E9's sqrt-stagger principle, baked per-frame here
+  // instead of a live CSS animation — same intent, no runtime cost).
+  for (const n of entries) {
+    if (n.dayIndex > dayCursor) continue;
+    const age = frameCount - n.revealFrame;
+    const POP_FRAMES = 9;
+    const pop = age >= POP_FRAMES ? 1 : (age <= 0 ? 0.05 : age / POP_FRAMES);
+    const eased = 1 - Math.pow(1 - pop, 3);
+    const e = n.e;
+    ctx.globalAlpha = eased;
+    if (e.kind === "memory") {
+      ctx.fillStyle = tagColor(e.tags);
+      ctx.beginPath(); ctx.arc(n.x, n.y, 3 * eased, 0, Math.PI * 2); ctx.fill();
+    } else if (e.kind === "tension") {
+      ctx.fillStyle = STATUS_COLOR[e.status];
+      ctx.beginPath(); ctx.arc(n.x, n.y, 6.5 * eased, 0, Math.PI * 2); ctx.fill();
+    } else if (e.kind === "idea") {
+      ctx.strokeStyle = "#ffb020"; ctx.setLineDash([2, 2]); ctx.lineWidth = 1.3 / scale;
+      ctx.beginPath(); ctx.arc(n.x, n.y, 4 * eased, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      ctx.save();
+      ctx.translate(n.x, n.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = stateColor(e.state);
+      ctx.globalAlpha = eased * (e.state === "spent" ? 0.5 : 0.9);
+      const s = 5.4 * eased;
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  // Captions are NOT drawn onto the frame — render-brain-movie.mjs builds a
+  // WebVTT track from window.getBeatsTiming() instead, using this exact
+  // warp table so the text lines up with what's on screen. Native <track>
+  // captions can be toggled off, resized, and read by a screen reader;
+  // text burned into the video pixels can do none of that, and — found by
+  // actually watching a rendered clip — would have doubled up with the
+  // native track anyway, since both draw from the same `beats` data.
+};
+
+// ---- Audio: rendered on an OfflineAudioContext, which — unlike the live
+// page's real AudioContext — can run FASTER than real time, since nothing
+// here depends on a wall clock. Same drone/riser/stinger synth as the live
+// page's sound toggle. Returns a base64 WAV string for Node to decode and
+// mux in with ffmpeg (there's no ffmpeg or file I/O available in-page).
+window.renderAudio = async function () {
+  const sampleRate = 44100;
+  const durS = window.MOVIE_CONFIG.durationMs / 1000;
+  const offlineCtx = new OfflineAudioContext(1, Math.ceil(sampleRate * durS), sampleRate);
+
+  const droneGain = offlineCtx.createGain();
+  droneGain.gain.setValueAtTime(0, 0);
+  droneGain.gain.linearRampToValueAtTime(0.035, 1.2);
+  droneGain.gain.setValueAtTime(0.035, Math.max(1.2, durS - 0.6));
+  droneGain.gain.linearRampToValueAtTime(0, durS);
+  droneGain.connect(offlineCtx.destination);
+  const drone = offlineCtx.createOscillator();
+  drone.type = "sine";
+  drone.frequency.value = 55;
+  const lfo = offlineCtx.createOscillator();
+  lfo.frequency.value = 0.07;
+  const lfoGain = offlineCtx.createGain();
+  lfoGain.gain.value = 6;
+  lfo.connect(lfoGain).connect(drone.frequency);
+  drone.connect(droneGain);
+  drone.start(0);
+  lfo.start(0);
+
+  for (const ev of window.getAudioSchedule()) {
+    const t0 = ev.seconds;
+    if (ev.type === "stinger") {
+      const freqs = ev.cue === "resolved" ? [660, 990] : ev.cue === "leaning" ? [440] : [330, 311];
+      freqs.forEach((f, i) => {
+        const osc = offlineCtx.createOscillator();
+        const g = offlineCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = f;
+        const s = t0 + i * 0.06;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.linearRampToValueAtTime(0.09, s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.5);
+        osc.connect(g).connect(offlineCtx.destination);
+        osc.start(s);
+        osc.stop(s + 0.55);
+      });
+    } else {
+      const osc = offlineCtx.createOscillator();
+      const g = offlineCtx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(120, t0);
+      osc.frequency.exponentialRampToValueAtTime(360, t0 + 0.5);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.45);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+      osc.connect(g).connect(offlineCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.6);
+    }
+  }
+
+  const buffer = await offlineCtx.startRendering();
+  const samples = buffer.getChannelData(0);
+  const pcm = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  const header = new ArrayBuffer(44);
+  const dv = new DataView(header);
+  function writeStr(off, str) { for (let i = 0; i < str.length; i++) dv.setUint8(off + i, str.charCodeAt(i)); }
+  const byteRate = sampleRate * 2;
+  writeStr(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true);
+  writeStr(8, "WAVE"); writeStr(12, "fmt "); dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sampleRate, true);
+  dv.setUint32(28, byteRate, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  writeStr(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+
+  const bytes = new Uint8Array(44 + pcm.length * 2);
+  bytes.set(new Uint8Array(header), 0);
+  bytes.set(new Uint8Array(pcm.buffer), 44);
+
+  // Chunked base64: String.fromCharCode(...bytes) on a multi-megabyte array
+  // blows the call stack (each argument counts against it).
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+};
+
+window.__READY__ = true;
+</script>
+</body>
+</html>
