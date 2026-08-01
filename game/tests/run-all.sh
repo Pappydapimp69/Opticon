@@ -20,4 +20,7 @@ echo
 echo "== wincheck (escape end-screen) =="
 node tests/wincheck.mjs
 echo
+echo "== zone hud (quadrant readout + watcher position-leak gate) =="
+node tests/zone-hud.mjs
+echo
 echo "ALL TESTS PASSED"

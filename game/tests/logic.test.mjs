@@ -32,6 +32,8 @@ import {
   hasLineOfSight,
   moveGuards,
   GUARD_SIGHT_RANGE,
+  quadrantOf,
+  addNoise,
 } from "../src/rules.js";
 import { playWatcherTurn, blendSuspicion } from "../src/watcherAI.js";
 import { prisonerAITurn } from "../src/prisonerAI.js";
@@ -966,6 +968,64 @@ section("dispatched guards capture on sight, not just same-tile contact");
   g.watcher.guards = [{ id: 3, x: cx - 3, y, quadrant: 0, life: GUARD_SIGHT_RANGE + 5 }];
   moveGuards(g);
   ok(!g.prisoners[0].alive, "a clear line within range captures without same-tile contact");
+}
+
+section("a decoy thrown after your own footsteps still pulls the guards");
+{
+  // The counterplay the how-to-play text promises: guards chase the FRESHEST
+  // noise in their quadrant, so a decoy is supposed to peel them off you. It
+  // didn't — two sounds made in the SAME turn both sit at NOISE_TTL, so the
+  // search kept whichever was pushed first (your own footsteps) and the
+  // guards walked straight at the prisoner with a live decoy on the board.
+  //
+  // Laid out along the East arm so the decoy is on the FAR side of the guard
+  // from the prisoner: chasing the right sound therefore walks the guard
+  // AWAY, and survival itself becomes the assertion. Collinear layouts where
+  // the decoy sits past the prisoner capture them either way and prove
+  // nothing.
+  const map = generateMap(31);
+  const { y } = map.center;
+  const cx = map.center.x;
+  const decoy = { x: cx + 3, y };
+  const guardAt = { x: cx + 9, y };
+  const prisonerAt = { x: cx + 15, y };
+  const dist = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+
+  function run(decoyLast) {
+    const g = createGame(map, { prisoners: [{ x: prisonerAt.x, y: prisonerAt.y }] });
+    clearStrip(g, y, cx + 1, cx + 16);
+    const p = g.prisoners[0];
+    g.noise = [];
+    g._noiseSeq = 0;
+    if (decoyLast) {
+      addNoise(g, p.x, p.y, "move");
+      addNoise(g, decoy.x, decoy.y, "decoy");
+    } else {
+      addNoise(g, decoy.x, decoy.y, "decoy");
+      addNoise(g, p.x, p.y, "move");
+    }
+    g.watcher.guards = [{ id: 1, x: guardAt.x, y: guardAt.y, quadrant: quadrantOf(g, decoy.x, decoy.y), life: 5 }];
+    moveGuards(g);
+    return { g, p, guard: g.watcher.guards[0] || { ...guardAt } };
+  }
+
+  const sane = run(true);
+  ok(quadrantOf(sane.g, decoy.x, decoy.y) === quadrantOf(sane.g, prisonerAt.x, prisonerAt.y),
+    "sanity: decoy and prisoner are in the same quadrant, so the guard could pick either");
+  ok(dist(guardAt, prisonerAt) > GUARD_SIGHT_RANGE,
+    "sanity: the guard cannot already see the prisoner before it moves");
+
+  // Decoy thrown LAST — the more recent sound — pulls the guard the other way.
+  ok(dist(sane.guard, decoy) < dist(guardAt, decoy),
+    `decoy last: guard closes on the decoy (${dist(guardAt, decoy)} -> ${dist(sane.guard, decoy)})`);
+  ok(sane.p.alive, "decoy last: the prisoner survives the guard's move");
+
+  // Thrown FIRST it is the STALER sound, so your own steps correctly win —
+  // otherwise "the decoy always wins" would just be a different hardcoded
+  // answer, not a freshness rule.
+  const stale = run(false);
+  ok(dist(stale.guard, prisonerAt) < dist(guardAt, prisonerAt),
+    `decoy first: guard closes on the prisoner instead (${dist(guardAt, prisonerAt)} -> ${dist(stale.guard, prisonerAt)})`);
 }
 
 // --- Summary --------------------------------------------------------------

@@ -1,7 +1,7 @@
 // main.js — Opticon 3D entry point. Wires map + rules + AI + render + input + UI
 // into a playable game: menu → play (single-player vs AI, or hotseat) → game over.
 
-import { generateMap, MAP_DEFAULTS, DIR_VEC, OBJ, ITEM_KINDS, ITEM_INFO } from "./map.js";
+import { generateMap, MAP_DEFAULTS, DIRS, DIR_VEC, OBJ, ITEM_KINDS, ITEM_INFO } from "./map.js";
 import {
   createGame,
   moveActivePrisoner,
@@ -20,6 +20,7 @@ import {
   useSkill,
   skillUsable,
   inWatcherGaze,
+  quadrantOf,
   SKILLS,
   SKILL_INFO,
 } from "./rules.js";
@@ -30,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.40.0";
+const BUILD = "beta-0.41.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -804,6 +805,39 @@ function doUseItem(kind, dirOrNull) {
   updateCommitButton();
 }
 
+// Which quadrant the human's own prisoner is standing in, and whether a
+// dispatched squad is currently sweeping it. DISPATCH became the dominant
+// difficulty lever (Tension T25), and its arrival is announced publicly as
+// an absolute compass quadrant — but a Prisoner had no on-screen frame of
+// reference to resolve that against, so the single most important warning
+// in the game was unreadable by its intended audience. Same signature-guard
+// + loop()-driven pattern as the item bar, and the same role gate: a
+// Watcher-role viewer must never read the human prisoner's position here.
+let _zoneSig = "";
+function updateZoneHud() {
+  const stat = document.getElementById("zoneStat");
+  const label = document.getElementById("zoneLabel");
+  if (!stat || !label) return;
+  const g = app.game;
+  const show = g && g.turn === "Prisoner" && humanControlsPrisoner();
+  const p = show ? g.prisoners[humanPrisonerIndex()] : null;
+  const q = p && p.alive && !p.escaped ? quadrantOf(g, p.x, p.y) : null;
+  // Only the guards' assigned quadrant is used, not their live position: the
+  // quadrant is what was publicly announced, so surfacing exactly that keeps
+  // the readout an aid to hearing the announcement, not free tracking intel.
+  const hunted = q != null && g.watcher.guards.some((gd) => gd.quadrant === q);
+  const sig = q == null ? "" : `${q}|${hunted ? 1 : 0}`;
+  if (sig === _zoneSig) return;
+  _zoneSig = sig;
+  if (q == null) {
+    stat.classList.add("hidden");
+    return;
+  }
+  stat.classList.remove("hidden");
+  label.textContent = hunted ? `⚠ ${DIRS[q]}` : DIRS[q];
+  label.classList.toggle("hunted", hunted);
+}
+
 // Rebuild the on-screen inventory chips. Only ever shows the HUMAN's own
 // prisoner — a companion's belt is not the player's to see or spend.
 // Driven from loop() rather than from each of the many places inventory can
@@ -1422,6 +1456,7 @@ function loop(t) {
   updateItemBar();
   updateSkillBar();
   updateSuspicionHud();
+  updateZoneHud();
   // Safety net: a staged path (and an armed break) only make sense during
   // the Prisoner's own turn.
   if (app.game && app.game.turn !== "Prisoner") {

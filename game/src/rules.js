@@ -731,10 +731,18 @@ export function moveGuards(game) {
   const params = dispatchParams(game);
   for (const guard of w.guards) {
     guard.life -= 1;
-    let target = null, bestTtl = -1;
+    // Freshest noise in this guard's quadrant: ttl first (an older sound has
+    // decayed), then `seq` to order sounds made in the same turn — without
+    // that second key this degenerates to "whichever was pushed first".
+    let target = null, bestTtl = -1, bestSeq = -1;
     for (const n of game.noise) {
       if (quadrantOf(game, n.x, n.y) !== guard.quadrant) continue;
-      if (n.ttl > bestTtl) { bestTtl = n.ttl; target = n; }
+      const seq = n.seq || 0;
+      if (n.ttl > bestTtl || (n.ttl === bestTtl && seq > bestSeq)) {
+        bestTtl = n.ttl;
+        bestSeq = seq;
+        target = n;
+      }
     }
     if (target) {
       const path = bfsPath(game.map, guard.x, guard.y, target.x, target.y, null);
@@ -867,9 +875,18 @@ function nextActivePrisoner(game) {
   return -1;
 }
 
-function addNoise(game, x, y, source) {
+export function addNoise(game, x, y, source) {
   game.noise = game.noise.filter((n) => !(n.x === x && n.y === y));
-  game.noise.push({ x, y, ttl: NOISE_TTL, source });
+  // `seq` is a strictly increasing stamp, and it exists because `ttl` alone
+  // cannot order two sounds made in the SAME turn — both sit at NOISE_TTL,
+  // so any "freshest noise" search silently falls back to array order.
+  // That made the DISTRACT decoy fail at the one job it has: throw it after
+  // moving noisily and the guards still walked at your footsteps, because
+  // those were pushed first. With a stamp, the later sound genuinely is the
+  // more recent one — which also makes throw-order a real tactical choice
+  // (decoy last to pull them off you; decoy first and your own steps win).
+  game._noiseSeq = (game._noiseSeq || 0) + 1;
+  game.noise.push({ x, y, ttl: NOISE_TTL, source, seq: game._noiseSeq });
 }
 
 function pushSelfNoise(prisoner, x, y) {
