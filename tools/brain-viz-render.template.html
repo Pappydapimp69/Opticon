@@ -2,245 +2,426 @@
 <html>
 <head><meta charset="utf-8" /></head>
 <body style="margin:0;background:#05070d">
-<canvas id="c" width="900" height="900"></canvas>
+<canvas id="c" width="1280" height="720"></canvas>
 <script>
-// brain-viz-render.template.html — the OFFLINE frame renderer. Never shipped
-// to viewers; render-brain-movie.mjs drives this page frame-by-frame (via
-// window.renderFrame(progress)) and screenshots the canvas into a PNG
-// sequence, which ffmpeg then encodes into the actual video file viewers
-// get. All the animation math (spiral placement, the semantic-anchor beat
-// warp, camera clamping) is IDENTICAL to brain-viz.template.html's, just
-// driven by a deterministic frame loop instead of requestAnimationFrame —
-// see that file and render-brain-movie.mjs for why this moved offline.
+// brain-viz-render.template.html — the OFFLINE frame renderer for a real
+// documentary/motion-graphics cut, not a spatial map that animates. Title
+// cards, counters ticking up, a growth chart drawing itself on, a project
+// bar race, a tension reel — cut together with hard fades, the way an
+// actual data documentary (not a live dashboard) is put together. Driven
+// frame-by-frame by render-brain-movie.mjs via window.renderFrame(progress)
+// and screenshotted into a PNG sequence that ffmpeg encodes into the real
+// video file viewers get — see that file for why this renders offline
+// instead of running live in a viewer's browser.
 const DATA = /*__DATA__*/;
 
-window.MOVIE_CONFIG = { width: 900, height: 900, fps: 30, durationMs: 42000 };
+window.MOVIE_CONFIG = { width: 1280, height: 720, fps: 30, durationMs: 42000 };
 
-const CX = 500, CY = 500;
-const R_MIN = 85, R_MAX = 460;
-const STATUS_COLOR = { open: "#ff6b7a", leaning: "#ffb020", resolved: "#59f7a6" };
-const STATE_COLOR = { live: "#b18cff", spent: "#55607a" };
-function stateColor(state) { return /promoted/i.test(state) ? "#7ee787" : (STATE_COLOR[state] || "#b18cff"); }
+const W = window.MOVIE_CONFIG.width, H = window.MOVIE_CONFIG.height;
+const COLOR = {
+  bg: "#05070d", text: "#dfe8f7", muted: "#8595b0", line: "rgba(120,150,200,0.18)",
+  prisoner: "#5ad4e6", watcher: "#ff6b7a", exit: "#59f7a6", idea: "#ffb020", explore: "#b18cff",
+};
+const STATUS_COLOR = { open: COLOR.watcher, leaning: COLOR.idea, resolved: COLOR.exit };
+const KIND_COLOR = { memory: COLOR.prisoner, tension: COLOR.watcher, idea: COLOR.idea, exploration: COLOR.explore };
 const TAG_PALETTE = {
   gamedesign: "#5ad4e6", ai: "#b18cff", testing: "#ffd166", devops: "#8595b0",
   gamedev: "#5ad4e6", determinism: "#ff9f5a", state: "#7ee787", cutscene: "#f778ba",
   browser: "#5ad4e6", input: "#ffd166", rendering: "#b18cff", balance: "#59f7a6",
   algorithm: "#ff9f5a", algo: "#ff9f5a", process: "#8595b0", tooling: "#8595b0",
 };
-function tagColor(tags) { for (const t of tags || []) if (TAG_PALETTE[t]) return TAG_PALETTE[t]; return "#dfe8f7"; }
 
 function daysBetween(a, b) { return Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000); }
 const totalDays = Math.max(1, daysBetween(DATA.minDate, DATA.maxDate));
-const TURNS = Math.min(10, Math.max(4, totalDays / 7));
-const dayArcWidth = Math.min(60, (360 * TURNS) / totalDays);
 
-const byDate = new Map();
+// ---- Data prep (real numbers only — every scene below reads from this) ----
+const dailyTotals = new Array(totalDays + 1).fill(0);
+const dailyByKind = { memory: new Array(totalDays + 1).fill(0), tension: new Array(totalDays + 1).fill(0), idea: new Array(totalDays + 1).fill(0), exploration: new Array(totalDays + 1).fill(0) };
 for (const e of DATA.entries) {
-  if (!byDate.has(e.date)) byDate.set(e.date, []);
-  byDate.get(e.date).push(e);
+  const d = daysBetween(DATA.minDate, e.date);
+  dailyTotals[d]++;
+  dailyByKind[e.kind][d]++;
 }
-function polar(r, deg) {
-  const rad = (deg - 90) * Math.PI / 180;
-  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
-}
-const entries = DATA.entries.map((e) => {
-  const dayList = byDate.get(e.date);
-  const t = daysBetween(DATA.minDate, e.date) / totalDays;
-  const within = dayList.length > 1 ? (dayList.indexOf(e) + 0.5) / dayList.length - 0.5 : 0;
-  const angle = t * TURNS * 360 + within * dayArcWidth;
-  const radius = R_MIN + t * (R_MAX - R_MIN);
-  const [x, y] = polar(radius, angle);
-  return { e, t, dayIndex: daysBetween(DATA.minDate, e.date), x, y, revealFrame: -1 };
-});
-entries.sort((a, b) => a.dayIndex - b.dayIndex);
-
-// ---- Beats: identical to the live page's — every tension's own date, plus
-// the day-one/today bookends, real data only. --------------------------
-const beats = DATA.entries
-  .filter((e) => e.kind === "tension")
-  .map((e) => ({ t: daysBetween(DATA.minDate, e.date) / totalDays, caption: e.id + " " + e.status + " — " + e.title, cue: e.status }));
-beats.push({ t: 0, caption: "Day one — " + DATA.minDate + ". The archive begins.", cue: "open" });
-beats.push({ t: 1, caption: "Today — " + DATA.entries.length + " entries across " + DATA.projects.length + " projects.", cue: "resolved" });
-beats.sort((a, b) => a.t - b.t);
-
-// ---- Semantic-anchor warp: identical construction to the live page's. --
-const DWELL_HALF_WIDTH = Math.min(0.05, Math.max(0.006, 1.2 / totalDays));
-const MIN_SPEED = 0.15;
-function localSpeed(rawT) {
-  let speed = 1;
-  for (const b of beats) {
-    const d = Math.abs(rawT - b.t) / DWELL_HALF_WIDTH;
-    if (d < 1) speed = Math.min(speed, MIN_SPEED + (1 - MIN_SPEED) * (0.5 - 0.5 * Math.cos(d * Math.PI)));
-  }
-  return speed;
-}
-const WARP_SAMPLES = 2000;
-const warpTable = [];
+const cumulative = []; // cumulative[d] = total entries by day d
 {
-  let cum = 0;
-  for (let i = 0; i <= WARP_SAMPLES; i++) {
-    const rawT = i / WARP_SAMPLES;
-    if (i > 0) cum += (1 / Math.max(MIN_SPEED, localSpeed(rawT))) / WARP_SAMPLES;
-    warpTable.push({ rawT, movieT: cum });
-  }
-  const total = warpTable[warpTable.length - 1].movieT || 1;
-  for (const row of warpTable) row.movieT /= total;
+  let run = 0;
+  for (let d = 0; d <= totalDays; d++) { run += dailyTotals[d]; cumulative.push(run); }
 }
-function movieProgressToRawT(p) {
-  p = Math.max(0, Math.min(1, p));
-  let lo = 0, hi = warpTable.length - 1;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (warpTable[mid].movieT < p) lo = mid + 1; else hi = mid; }
-  return warpTable[lo].rawT;
+const projectCounts = new Map();
+for (const e of DATA.entries) {
+  if (!e.project) continue;
+  projectCounts.set(e.project, (projectCounts.get(e.project) || 0) + 1);
 }
-function rawTToMovieProgress(rawT) {
-  let lo = 0, hi = warpTable.length - 1;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (warpTable[mid].rawT < rawT) lo = mid + 1; else hi = mid; }
-  return warpTable[lo].movieT;
-}
+const topProjects = [...projectCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
-// Exposed so render-brain-movie.mjs can build the WebVTT captions and the
-// audio cue schedule from this SAME warp table — one source of truth for
-// timing instead of two scripts that could quietly drift apart.
+const tagCounts = new Map();
+for (const e of DATA.entries) {
+  if (e.kind !== "memory") continue;
+  for (const t of e.tags || []) tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
+}
+const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+const tensions = DATA.entries.filter((e) => e.kind === "tension").sort((a, b) => a.date < b.date ? -1 : 1);
+const tensionStatusCounts = { open: 0, leaning: 0, resolved: 0 };
+for (const t of tensions) tensionStatusCounts[t.status]++;
+
+// ---- Scenes -----------------------------------------------------------------
+// Each scene owns a [start,end) window in seconds. Cut with a hard fade
+// through black (documentary-standard, and simpler/more reliable than a
+// crossfade of two different draw routines) — see sceneAlpha below.
+const SCENES = [
+  { key: "title", start: 0, end: 3.5 },
+  { key: "totals", start: 3.5, end: 9.5 },
+  { key: "growth", start: 9.5, end: 18 },
+  { key: "projects", start: 18, end: 26 },
+  { key: "tags", start: 26, end: 32 },
+  { key: "tensions", start: 32, end: 40 },
+  { key: "closing", start: 40, end: 42 },
+];
+window.MOVIE_CONFIG.durationMs = SCENES[SCENES.length - 1].end * 1000;
+
+// Accessible, real-data captions — one per scene, describing what's on
+// screen (the animated bars/counters have no other text equivalent for a
+// screen reader or a deaf viewer). NARRATION/voiceover-restraint: state
+// what the image can't show as text alone (the real numbers), not a
+// decorative restatement.
 window.getBeatsTiming = function () {
-  const durS = window.MOVIE_CONFIG.durationMs / 1000;
-  return beats.map((b) => ({ caption: b.caption, cue: b.cue, seconds: rawTToMovieProgress(b.t) * durS }));
+  return [
+    { seconds: SCENES[0].start, caption: "Opticon presents: the archive, day one to today." },
+    { seconds: SCENES[1].start, caption: DATA.entries.length + " entries: " + DATA.counts.memory + " memory lessons, " + DATA.counts.tension + " tensions, " + DATA.counts.idea + " ideas, " + DATA.counts.exploration + " exploration entries." },
+    { seconds: SCENES[2].start, caption: "Growth over time, " + DATA.minDate + " to " + DATA.maxDate + "." },
+    { seconds: SCENES[3].start, caption: "Top projects by entry count: " + topProjects.slice(0, 3).map((p) => p[0]).join(", ") + ", and more." },
+    { seconds: SCENES[4].start, caption: "Top tags across memory lessons: " + topTags.slice(0, 3).map((t) => t[0]).join(", ") + ", and more." },
+    { seconds: SCENES[5].start, caption: DATA.counts.tension + " tensions: " + tensionStatusCounts.resolved + " resolved, " + tensionStatusCounts.leaning + " leaning, " + tensionStatusCounts.open + " open." },
+    { seconds: SCENES[6].start, caption: "Today: " + DATA.entries.length + " entries across " + DATA.projects.length + " projects." },
+  ];
 };
-
-// Same three-layer drone/riser/stinger model as the live page, just
-// returned as a schedule (seconds, type, cue) instead of fired from a
-// rAF loop — render-brain-movie.mjs renders this on an OfflineAudioContext,
-// which can run FASTER than real-time since nothing here depends on a
-// live clock.
+// Audio cue schedule: a stinger on every cut, a short riser leading into
+// the two "big reveal" scenes (totals, projects) for a bit of build.
 window.getAudioSchedule = function () {
-  const durS = window.MOVIE_CONFIG.durationMs / 1000;
-  const lookahead = DWELL_HALF_WIDTH * 0.6;
   const events = [];
-  for (const b of beats) {
-    const atS = rawTToMovieProgress(b.t) * durS;
-    if (b.t > 0) events.push({ type: "riser", seconds: Math.max(0, rawTToMovieProgress(Math.max(0, b.t - lookahead)) * durS) });
-    events.push({ type: "stinger", seconds: atS, cue: b.cue });
+  for (const s of SCENES) {
+    if (s.start > 0) events.push({ type: "stinger", seconds: s.start, cue: s.key === "closing" ? "resolved" : "leaning" });
   }
+  events.push({ type: "riser", seconds: Math.max(0, SCENES[1].start - 0.5) });
+  events.push({ type: "riser", seconds: Math.max(0, SCENES[3].start - 0.5) });
   return events;
 };
 
-// ---- Canvas rendering --------------------------------------------------
+// ---- Canvas setup + shared drawing helpers -----------------------------------
 const canvas = document.getElementById("c");
-const W = window.MOVIE_CONFIG.width, H = window.MOVIE_CONFIG.height;
 canvas.width = W; canvas.height = H;
 const ctx = canvas.getContext("2d");
 
-let cameraRadius = null;
-let frameCount = 0;
-const dt = 1 / window.MOVIE_CONFIG.fps;
+function ease(t) { return 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3); } // easeOutCubic
+function fmt(n) { return n.toLocaleString("en-US"); }
 
-window.renderFrame = function (progress) {
-  frameCount++;
-  const rawT = movieProgressToRawT(progress);
-  const dayCursor = Math.floor(rawT * totalDays);
-
-  // Camera: clamp to the true revealed extent, smoothed exponentially —
-  // identical approach to the live page, just fed a fixed dt each call
-  // instead of a measured one, since frames are rendered in lockstep.
-  let maxR = R_MIN;
-  for (const n of entries) {
-    if (n.dayIndex > dayCursor) continue;
-    if (n.revealFrame === -1) n.revealFrame = frameCount;
-    const r = Math.hypot(n.x - CX, n.y - CY);
-    if (r > maxR) maxR = r;
-  }
-  const targetR = Math.min(500, maxR + 50);
-  cameraRadius = cameraRadius === null ? targetR : cameraRadius + (targetR - cameraRadius) * (1 - Math.exp(-4 * dt));
-
-  // World coordinates are the same 0..1000 space the SVG version used;
-  // cameraRadius is the SVG version's viewBox half-size, so map the world
-  // point (CX, CY) — always the tower, the fixed center — to the canvas
-  // center, at a scale that fits the current zoom level into the canvas.
-  const scale = W / (cameraRadius * 2);
+function clear() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#05070d";
+  ctx.fillStyle = COLOR.bg;
   ctx.fillRect(0, 0, W, H);
-  ctx.save();
-  ctx.setTransform(scale, 0, 0, scale, W / 2 - scale * CX, H / 2 - scale * CY);
+}
+function chrome(sceneKey) {
+  // Persistent thin brand mark + a bottom progress rail, present on every
+  // scene except the title/closing cards (which own the full frame).
+  if (sceneKey === "title" || sceneKey === "closing") return;
+  ctx.fillStyle = COLOR.prisoner;
+  ctx.font = "700 16px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.globalAlpha = 0.8;
+  ctx.fillText("OPTICON", 40, 44);
+  ctx.globalAlpha = 1;
+}
+function progressRail(tSec, duration) {
+  ctx.fillStyle = COLOR.line;
+  ctx.fillRect(0, H - 4, W, 4);
+  ctx.fillStyle = COLOR.prisoner;
+  ctx.fillRect(0, H - 4, W * Math.max(0, Math.min(1, tSec / duration)), 4);
+}
+function eye(cx, cy, r) {
+  ctx.strokeStyle = COLOR.prisoner; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.globalAlpha = 0.7; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = COLOR.watcher;
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.18, 0, Math.PI * 2); ctx.fill();
+}
 
-  // Guide spiral
-  ctx.strokeStyle = "rgba(120,150,200,0.14)";
-  ctx.lineWidth = 1 / scale;
+// ---- Scene: title -------------------------------------------------------
+function drawTitle(t, s) {
+  const local = t - s.start, dur = s.end - s.start;
+  const logoIn = ease(local / 0.8);
+  ctx.save();
+  ctx.globalAlpha = logoIn;
+  eye(W / 2, H / 2 - 60, 46 * (0.7 + 0.3 * logoIn));
+  ctx.restore();
+  const textIn = ease((local - 0.5) / 0.8);
+  if (textIn > 0) {
+    ctx.globalAlpha = textIn;
+    ctx.fillStyle = COLOR.prisoner;
+    ctx.font = "700 52px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("OPTICON", W / 2, H / 2 + 40);
+    ctx.globalAlpha = 1;
+  }
+  const subIn = ease((local - 1.1) / 0.8);
+  if (subIn > 0) {
+    ctx.globalAlpha = subIn * 0.85;
+    ctx.fillStyle = COLOR.muted;
+    ctx.font = "400 18px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText("the archive, " + DATA.minDate + " to " + DATA.maxDate, W / 2, H / 2 + 74);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---- Scene: totals (counters ticking up, staggered) ----------------------
+function drawTotals(t, s) {
+  const local = t - s.start;
+  ctx.textAlign = "center";
+  const headIn = ease(local / 0.5);
+  ctx.globalAlpha = headIn;
+  ctx.fillStyle = COLOR.muted;
+  ctx.font = "600 20px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText("EVERY LESSON, TENSION, IDEA, AND EXPERIMENT", W / 2, H / 2 - 150);
+  ctx.globalAlpha = 1;
+
+  const bigProgress = ease((local - 0.3) / 1.6);
+  const bigVal = Math.round(DATA.entries.length * bigProgress);
+  ctx.fillStyle = COLOR.text;
+  ctx.font = "700 96px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText(fmt(bigVal), W / 2, H / 2 - 40);
+  ctx.font = "500 20px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillStyle = COLOR.muted;
+  ctx.fillText("ENTRIES", W / 2, H / 2 - 4);
+
+  const chips = [
+    { label: "MEMORY", n: DATA.counts.memory, color: KIND_COLOR.memory },
+    { label: "TENSIONS", n: DATA.counts.tension, color: KIND_COLOR.tension },
+    { label: "IDEAS", n: DATA.counts.idea, color: KIND_COLOR.idea },
+    { label: "EXPLORATION", n: DATA.counts.exploration, color: KIND_COLOR.exploration },
+  ];
+  const chipW = 240, gap = 20, totalW = chips.length * chipW + (chips.length - 1) * gap;
+  const startX = W / 2 - totalW / 2;
+  chips.forEach((c, i) => {
+    const chipT = ease((local - 2.0 - i * 0.15) / 0.7);
+    if (chipT <= 0) return;
+    const x = startX + i * (chipW + gap);
+    const y = H / 2 + 70;
+    ctx.globalAlpha = chipT;
+    ctx.fillStyle = "rgba(14,18,30,0.9)";
+    ctx.strokeStyle = COLOR.line;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, chipW, 90, 10); else ctx.rect(x, y, chipW, 90);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = c.color;
+    ctx.font = "700 34px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText(fmt(Math.round(c.n * chipT)), x + chipW / 2, y + 46);
+    ctx.fillStyle = COLOR.muted;
+    ctx.font = "600 13px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText(c.label, x + chipW / 2, y + 70);
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ---- Scene: growth chart (draws itself on) -------------------------------
+function drawGrowth(t, s) {
+  const local = t - s.start, dur = s.end - s.start;
+  ctx.textAlign = "left";
+  ctx.fillStyle = COLOR.text;
+  ctx.font = "700 26px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText("GROWTH OVER TIME", 80, 100);
+  ctx.fillStyle = COLOR.muted;
+  ctx.font = "400 15px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText(DATA.minDate + " → " + DATA.maxDate + " · " + fmt(DATA.projects.length) + " projects", 80, 126);
+
+  const padL = 80, padR = 80, padT = 170, padB = 110;
+  const cw = W - padL - padR, ch = H - padT - padB;
+  const maxTotal = cumulative[cumulative.length - 1];
+
+  // axes
+  ctx.strokeStyle = COLOR.line; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + ch); ctx.lineTo(padL + cw, padT + ch); ctx.stroke();
+
+  const reveal = ease((local - 0.3) / (dur - 1.2));
+  const revealDays = Math.max(0, Math.min(totalDays, reveal * totalDays));
+
+  ctx.strokeStyle = COLOR.prisoner; ctx.lineWidth = 3; ctx.lineJoin = "round";
   ctx.beginPath();
-  const STEPS = 360;
-  for (let i = 0; i <= STEPS; i++) {
-    const t = i / STEPS;
-    const [x, y] = polar(R_MIN + t * (R_MAX - R_MIN), t * TURNS * 360);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  for (let d = 0; d <= revealDays; d++) {
+    const x = padL + (d / totalDays) * cw;
+    const y = padT + ch - (cumulative[d] / maxTotal) * ch;
+    if (d === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
 
-  // Gaze sweep — deterministic slow rotation tied to frame count, not
-  // wall-clock (there is no wall clock here; every frame is baked once).
-  const sweepAngle = (frameCount * 2.2) % 360;
-  const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, R_MAX + 25);
-  grad.addColorStop(0, "rgba(90,212,230,0.08)");
-  grad.addColorStop(1, "rgba(90,212,230,0)");
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.moveTo(CX, CY);
-  ctx.arc(CX, CY, R_MAX + 25, (sweepAngle - 45 - 90) * Math.PI / 180, (sweepAngle + 45 - 90) * Math.PI / 180);
-  ctx.closePath();
-  ctx.fill();
+  if (revealDays > 0) {
+    const d = Math.floor(revealDays);
+    const x = padL + (d / totalDays) * cw;
+    const y = padT + ch - (cumulative[d] / maxTotal) * ch;
+    ctx.fillStyle = COLOR.watcher;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = COLOR.text;
+    ctx.textAlign = "left";
+    ctx.font = "700 20px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText(fmt(cumulative[d]), Math.min(x + 12, padL + cw - 90), y - 12);
+  }
 
-  // Tower
-  ctx.fillStyle = "#0e121e"; ctx.strokeStyle = "#5ad4e6"; ctx.lineWidth = 2 / scale;
-  ctx.beginPath(); ctx.arc(CX, CY, 54, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.arc(CX, CY, 32, 0, Math.PI * 2); ctx.globalAlpha = 0.8; ctx.stroke(); ctx.globalAlpha = 1;
-  ctx.fillStyle = "#ff6b7a";
-  ctx.beginPath(); ctx.arc(CX, CY, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = COLOR.muted;
+  ctx.font = "400 13px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(DATA.minDate, padL, padT + ch + 26);
+  ctx.textAlign = "right";
+  ctx.fillText(DATA.maxDate, padL + cw, padT + ch + 26);
+}
 
-  // Nodes, with a short pop-in scale/fade keyed off frames-since-reveal
-  // (garden-viz#E8/E9's sqrt-stagger principle, baked per-frame here
-  // instead of a live CSS animation — same intent, no runtime cost).
-  for (const n of entries) {
-    if (n.dayIndex > dayCursor) continue;
-    const age = frameCount - n.revealFrame;
-    const POP_FRAMES = 9;
-    const pop = age >= POP_FRAMES ? 1 : (age <= 0 ? 0.05 : age / POP_FRAMES);
-    const eased = 1 - Math.pow(1 - pop, 3);
-    const e = n.e;
-    ctx.globalAlpha = eased;
-    if (e.kind === "memory") {
-      ctx.fillStyle = tagColor(e.tags);
-      ctx.beginPath(); ctx.arc(n.x, n.y, 3 * eased, 0, Math.PI * 2); ctx.fill();
-    } else if (e.kind === "tension") {
-      ctx.fillStyle = STATUS_COLOR[e.status];
-      ctx.beginPath(); ctx.arc(n.x, n.y, 6.5 * eased, 0, Math.PI * 2); ctx.fill();
-    } else if (e.kind === "idea") {
-      ctx.strokeStyle = "#ffb020"; ctx.setLineDash([2, 2]); ctx.lineWidth = 1.3 / scale;
-      ctx.beginPath(); ctx.arc(n.x, n.y, 4 * eased, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-    } else {
-      ctx.save();
-      ctx.translate(n.x, n.y);
-      ctx.rotate(Math.PI / 4);
-      ctx.fillStyle = stateColor(e.state);
-      ctx.globalAlpha = eased * (e.state === "spent" ? 0.5 : 0.9);
-      const s = 5.4 * eased;
-      ctx.fillRect(-s / 2, -s / 2, s, s);
-      ctx.restore();
-    }
+// ---- Scene: project bar race ---------------------------------------------
+function drawBars(t, s, title, rows, startDelayEach) {
+  const local = t - s.start;
+  ctx.textAlign = "left";
+  ctx.fillStyle = COLOR.text;
+  ctx.font = "700 26px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText(title, 80, 100);
+
+  const maxN = rows[0] ? rows[0][1] : 1;
+  const top = 150, rowH = 54, barMaxW = W - 500;
+  rows.forEach((row, i) => {
+    const [label, n, color] = row;
+    const rt = ease((local - i * 0.12) / 0.6);
+    if (rt <= 0) return;
+    const y = top + i * rowH;
+    ctx.fillStyle = COLOR.muted;
+    ctx.font = "500 15px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "right";
+    const labelText = label.length > 34 ? label.slice(0, 33) + "…" : label;
+    ctx.fillText(labelText, 350, y + 24);
+
+    const w = barMaxW * (n / maxN) * rt;
+    ctx.fillStyle = color || COLOR.prisoner;
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(360, y, w, 30);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = COLOR.text;
+    ctx.font = "700 16px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(fmt(Math.round(n * rt)), 360 + w + 12, y + 22);
+  });
+}
+
+// ---- Scene: tension reel ---------------------------------------------------
+function drawTensions(t, s) {
+  const local = t - s.start, dur = s.end - s.start;
+  ctx.textAlign = "center";
+  const headOut = local < 1.6 ? 1 : Math.max(0, 1 - (local - 1.6) / 0.5);
+  if (headOut > 0) {
+    ctx.globalAlpha = ease(Math.min(local / 0.5, headOut));
+    ctx.fillStyle = COLOR.text;
+    ctx.font = "700 44px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText(fmt(tensions.length) + " TENSIONS", W / 2, H / 2 - 10);
+    ctx.fillStyle = COLOR.muted;
+    ctx.font = "400 17px 'Segoe UI', system-ui, sans-serif";
+    ctx.fillText("unresolved contradictions, tradeoffs, and open questions along the way", W / 2, H / 2 + 26);
     ctx.globalAlpha = 1;
   }
-  ctx.restore();
-  // Captions are NOT drawn onto the frame — render-brain-movie.mjs builds a
-  // WebVTT track from window.getBeatsTiming() instead, using this exact
-  // warp table so the text lines up with what's on screen. Native <track>
-  // captions can be toggled off, resized, and read by a screen reader;
-  // text burned into the video pixels can do none of that, and — found by
-  // actually watching a rendered clip — would have doubled up with the
-  // native track anyway, since both draw from the same `beats` data.
+
+  // Scrolling marquee, running for the middle of the scene.
+  const scrollStart = 1.8, scrollEnd = dur - 1.8;
+  if (local > scrollStart && local < scrollEnd + 0.6) {
+    const rowH = 40;
+    const listH = tensions.length * rowH;
+    const speed = (listH + H) / (scrollEnd - scrollStart);
+    const y0 = H - ((local - scrollStart) * speed);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 130, W, H - 230); ctx.clip();
+    tensions.forEach((tn, i) => {
+      const y = y0 + i * rowH;
+      if (y < 100 || y > H - 80) return;
+      ctx.textAlign = "left";
+      ctx.fillStyle = STATUS_COLOR[tn.status];
+      ctx.beginPath(); ctx.arc(430, y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = COLOR.text;
+      ctx.font = "500 17px 'Segoe UI', system-ui, sans-serif";
+      const line = tn.id + "  " + (tn.title.length > 58 ? tn.title.slice(0, 57) + "…" : tn.title);
+      ctx.fillText(line, 450, y + 6);
+    });
+    ctx.restore();
+    // fade the clipped region's top/bottom edges
+    const gradTop = ctx.createLinearGradient(0, 130, 0, 190);
+    gradTop.addColorStop(0, COLOR.bg); gradTop.addColorStop(1, "rgba(5,7,13,0)");
+    ctx.fillStyle = gradTop; ctx.fillRect(0, 130, W, 60);
+    const gradBot = ctx.createLinearGradient(0, H - 150, 0, H - 90);
+    gradBot.addColorStop(0, "rgba(5,7,13,0)"); gradBot.addColorStop(1, COLOR.bg);
+    ctx.fillStyle = gradBot; ctx.fillRect(0, H - 150, W, 60);
+  }
+
+  // Closing stat card for this scene.
+  const cardIn = ease((local - (dur - 1.6)) / 1.0);
+  if (cardIn > 0) {
+    ctx.globalAlpha = cardIn;
+    ctx.fillStyle = "rgba(5,7,13,0.92)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = COLOR.text;
+    ctx.font = "600 22px 'Segoe UI', system-ui, sans-serif";
+    const line = tensionStatusCounts.resolved + " resolved  ·  " + tensionStatusCounts.leaning + " leaning  ·  " + tensionStatusCounts.open + " open";
+    ctx.fillText(line, W / 2, H / 2 + 8);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---- Scene: closing ---------------------------------------------------------
+function drawClosing(t, s) {
+  const local = t - s.start;
+  ctx.globalAlpha = ease(local / 0.6);
+  eye(W / 2, H / 2 - 50, 34);
+  ctx.textAlign = "center";
+  ctx.fillStyle = COLOR.text;
+  ctx.font = "700 34px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText("TODAY", W / 2, H / 2 + 20);
+  ctx.fillStyle = COLOR.muted;
+  ctx.font = "400 16px 'Segoe UI', system-ui, sans-serif";
+  ctx.fillText(fmt(DATA.entries.length) + " entries · " + fmt(DATA.projects.length) + " projects · still growing", W / 2, H / 2 + 50);
+  ctx.globalAlpha = 1;
+}
+
+function sceneAlpha(tSec, scene, fade) {
+  const fadeInEnd = scene.start + fade;
+  const fadeOutStart = scene.end - fade;
+  if (tSec < fadeInEnd) return 1 - (tSec - scene.start) / fade;
+  if (tSec > fadeOutStart) return (tSec - fadeOutStart) / fade;
+  return 0;
+}
+
+window.renderFrame = function (progress) {
+  const tSec = progress * (window.MOVIE_CONFIG.durationMs / 1000);
+  clear();
+  let scene = SCENES[SCENES.length - 1];
+  for (const s of SCENES) { if (tSec >= s.start && tSec < s.end) { scene = s; break; } }
+
+  chrome(scene.key);
+  if (scene.key === "title") drawTitle(tSec, scene);
+  else if (scene.key === "totals") drawTotals(tSec, scene);
+  else if (scene.key === "growth") drawGrowth(tSec, scene);
+  else if (scene.key === "projects") drawBars(tSec, scene, "TOP PROJECTS BY ENTRIES", topProjects.map(([label, n], i) => [label, n, [COLOR.prisoner, COLOR.idea, COLOR.explore, COLOR.exit][i % 4]]));
+  else if (scene.key === "tags") drawBars(tSec, scene, "TOP TAGS ACROSS MEMORY", topTags.map(([label, n]) => [label, n, TAG_PALETTE[label] || COLOR.prisoner]));
+  else if (scene.key === "tensions") drawTensions(tSec, scene);
+  else if (scene.key === "closing") drawClosing(tSec, scene);
+
+  if (scene.key !== "title" && scene.key !== "closing") progressRail(tSec, window.MOVIE_CONFIG.durationMs / 1000);
+
+  const fadeAlpha = sceneAlpha(tSec, scene, 0.35);
+  if (fadeAlpha > 0) {
+    ctx.fillStyle = "#000";
+    ctx.globalAlpha = Math.min(1, fadeAlpha);
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
 };
 
-// ---- Audio: rendered on an OfflineAudioContext, which — unlike the live
-// page's real AudioContext — can run FASTER than real time, since nothing
-// here depends on a wall clock. Same drone/riser/stinger synth as the live
-// page's sound toggle. Returns a base64 WAV string for Node to decode and
-// mux in with ffmpeg (there's no ffmpeg or file I/O available in-page).
+// ---- Audio: same drone/riser/stinger model as before, retimed to scene
+// cuts instead of spiral beats. Rendered on an OfflineAudioContext, which
+// can run faster than real time since nothing here depends on a wall
+// clock. Returns a base64 WAV string for Node to decode and mux with
+// ffmpeg (no ffmpeg or file I/O available in-page).
 window.renderAudio = async function () {
   const sampleRate = 44100;
   const durS = window.MOVIE_CONFIG.durationMs / 1000;
@@ -248,17 +429,17 @@ window.renderAudio = async function () {
 
   const droneGain = offlineCtx.createGain();
   droneGain.gain.setValueAtTime(0, 0);
-  droneGain.gain.linearRampToValueAtTime(0.035, 1.2);
-  droneGain.gain.setValueAtTime(0.035, Math.max(1.2, durS - 0.6));
+  droneGain.gain.linearRampToValueAtTime(0.03, 1.2);
+  droneGain.gain.setValueAtTime(0.03, Math.max(1.2, durS - 0.6));
   droneGain.gain.linearRampToValueAtTime(0, durS);
   droneGain.connect(offlineCtx.destination);
   const drone = offlineCtx.createOscillator();
   drone.type = "sine";
-  drone.frequency.value = 55;
+  drone.frequency.value = 60;
   const lfo = offlineCtx.createOscillator();
-  lfo.frequency.value = 0.07;
+  lfo.frequency.value = 0.08;
   const lfoGain = offlineCtx.createGain();
-  lfoGain.gain.value = 6;
+  lfoGain.gain.value = 5;
   lfo.connect(lfoGain).connect(drone.frequency);
   drone.connect(droneGain);
   drone.start(0);
@@ -267,32 +448,32 @@ window.renderAudio = async function () {
   for (const ev of window.getAudioSchedule()) {
     const t0 = ev.seconds;
     if (ev.type === "stinger") {
-      const freqs = ev.cue === "resolved" ? [660, 990] : ev.cue === "leaning" ? [440] : [330, 311];
+      const freqs = ev.cue === "resolved" ? [660, 990] : [440, 550];
       freqs.forEach((f, i) => {
         const osc = offlineCtx.createOscillator();
         const g = offlineCtx.createGain();
         osc.type = "triangle";
         osc.frequency.value = f;
-        const s = t0 + i * 0.06;
+        const s = t0 + i * 0.05;
         g.gain.setValueAtTime(0.0001, s);
-        g.gain.linearRampToValueAtTime(0.09, s + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.5);
+        g.gain.linearRampToValueAtTime(0.07, s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.4);
         osc.connect(g).connect(offlineCtx.destination);
         osc.start(s);
-        osc.stop(s + 0.55);
+        osc.stop(s + 0.45);
       });
     } else {
       const osc = offlineCtx.createOscillator();
       const g = offlineCtx.createGain();
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(120, t0);
-      osc.frequency.exponentialRampToValueAtTime(360, t0 + 0.5);
+      osc.frequency.setValueAtTime(140, t0);
+      osc.frequency.exponentialRampToValueAtTime(380, t0 + 0.45);
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.45);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+      g.gain.exponentialRampToValueAtTime(0.04, t0 + 0.4);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
       osc.connect(g).connect(offlineCtx.destination);
       osc.start(t0);
-      osc.stop(t0 + 0.6);
+      osc.stop(t0 + 0.55);
     }
   }
 
@@ -300,8 +481,8 @@ window.renderAudio = async function () {
   const samples = buffer.getChannelData(0);
   const pcm = new Int16Array(samples.length);
   for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
   }
   const header = new ArrayBuffer(44);
   const dv = new DataView(header);
@@ -317,13 +498,9 @@ window.renderAudio = async function () {
   bytes.set(new Uint8Array(header), 0);
   bytes.set(new Uint8Array(pcm.buffer), 44);
 
-  // Chunked base64: String.fromCharCode(...bytes) on a multi-megabyte array
-  // blows the call stack (each argument counts against it).
   let binary = "";
   const CHUNK = 8192;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
+  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
   return btoa(binary);
 };
 

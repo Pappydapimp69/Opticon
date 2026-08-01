@@ -1,117 +1,29 @@
 WEBVTT
 
 1
-00:00:00.000 --> 00:00:05.000
-Day one — 2026-06-14. The archive begins.
+00:00:00.000 --> 00:00:03.500
+Opticon presents: the archive, day one to today.
 
 2
-00:00:09.852 --> 00:00:10.852
-T1 leaning — "systems-over-data" vs a real ECS
+00:00:03.500 --> 00:00:09.500
+1147 entries: 545 memory lessons, 27 tensions, 555 ideas, 20 exploration entries.
 
 3
-00:00:09.852 --> 00:00:10.852
-T2 leaning — determinism vs a physics-driven renderer
+00:00:09.500 --> 00:00:18.000
+Growth over time, 2026-06-14 to 2026-08-01.
 
 4
-00:00:09.852 --> 00:00:10.852
-T3 open — the "co-op without a rewrite" promise vs save schema
+00:00:18.000 --> 00:00:26.000
+Top projects by entry count: pappydapimp69/dog, Pappydapimp69/Opticon, Echoes of the Shattered Realm — Milestone 0, and more.
 
 5
-00:00:09.852 --> 00:00:10.852
-T4 leaning — scripted quests vs emergent systems
+00:00:26.000 --> 00:00:32.000
+Top tags across memory lessons: gamedev, state, testing, and more.
 
 6
-00:00:09.852 --> 00:00:10.852
-T5 leaning — soft death vs "fallen civilization" stakes
+00:00:32.000 --> 00:00:40.000
+27 tensions: 5 resolved, 17 leaning, 5 open.
 
 7
-00:00:09.852 --> 00:00:10.852
-T6 leaning — data-driven flexibility vs lost compile-time safety
-
-8
-00:00:09.852 --> 00:00:10.852
-T7 leaning — how much progression depth does a *slice* need?
-
-9
-00:00:09.852 --> 00:00:10.852
-T8 leaning — hand-edited JSON scales to the slice
-
-10
-00:00:09.852 --> 00:00:10.852
-T9 leaning — headless sim proves systems but cannot prove *feel*
-
-11
-00:00:09.852 --> 00:00:10.852
-T10 leaning — greybox-first keeps a "3D RPG" on schedule
-
-12
-00:00:09.852 --> 00:00:10.852
-T11 open — automated 3D verification has a ceiling (logic, not looks)
-
-13
-00:00:09.852 --> 00:00:10.852
-T12 leaning — vendoring Three.js (repo bloat) vs a build step / CDN
-
-14
-00:00:09.852 --> 00:00:10.852
-T13 leaning — input breadth vs combinatorial complexity
-
-15
-00:00:09.852 --> 00:00:12.039
-T14 leaning — synthesized SFX (zero assets) vs authored audio
-
-16
-00:00:12.039 --> 00:00:14.147
-T15 leaning — shipping cadence vs cognitive-logging cadence
-
-17
-00:00:14.147 --> 00:00:15.147
-T16 leaning — engine paths not taken (migrated from creativity A1)
-
-18
-00:00:14.147 --> 00:00:17.073
-T17 open — Phase 1 convention survives reactive work without the Phase 2 gate
-
-19
-00:00:17.073 --> 00:00:21.413
-T18 leaning — explain-to-teach vs tell-a-story (the vote film's north star)
-
-20
-00:00:21.413 --> 00:00:24.786
-T19 resolved — plot coherence vs perceived player agency (the "narrative paradox")
-
-21
-00:00:24.786 --> 00:00:25.786
-T20 leaning — one composing entry is enough to draw a co-verification edge
-
-22
-00:00:24.786 --> 00:00:26.973
-T21 open — should the co-verification graph model NEGATIVE edges (systems that fight)?
-
-23
-00:00:26.973 --> 00:00:31.973
-T22 resolved — co-verification edges: verified-built-only intake vs a review lane for synthesized edges
-
-24
-00:00:34.291 --> 00:00:35.291
-T23 resolved — an AI-vs-AI sim is a valid balance oracle for reachability, not for human-facing difficulty
-
-25
-00:00:34.291 --> 00:00:39.153
-T24 resolved — a cautious opponent-AI is realistic but can stalemate a human
-
-26
-00:00:39.153 --> 00:00:42.000
-T26 open — an entry that quotes another system's name as an ILLUSTRATIVE EXAMPLE reads to the graph builder as a genuine composition
-
-27
-00:00:42.000 --> 00:00:43.000
-T25 resolved — does "difficulty" mean prisoner-favorable-to-Watcher, or opponent-skill relative to whichever role the human picked?
-
-28
-00:00:42.000 --> 00:00:43.000
-T27 leaning — a keyword pre-commit gate that false-positives on ordinary English trains the reflex it exists to prevent
-
-29
-00:00:42.000 --> 00:00:47.000
-Today — 1147 entries across 143 projects.
+00:00:40.000 --> 00:00:42.000
+Today: 1147 entries across 143 projects.
