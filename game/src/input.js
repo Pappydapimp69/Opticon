@@ -22,6 +22,8 @@ export class Input {
     this.keys = new Set();
     this.padPrev = [];
     this.padPressed = []; // current-frame gamepad button state, for hold checks
+    this.activePadIndex = null;
+    this.activePadKey = null;
     this._stickHeld = false;
     this.slotCursor = 0; // gamepad item/skill slot selection (LT cycles, RT fires)
     this.activeScheme = "keyboard";
@@ -111,7 +113,7 @@ export class Input {
       Digit1: () => { this.onIntent("item", 0); this.onIntent("bluff", 0); },
       Digit2: () => { this.onIntent("item", 1); this.onIntent("bluff", 1); },
       Digit3: () => this.onIntent("bluff", 2), Digit4: () => this.onIntent("bluff", 3),
-      // 5-8: Watcher skills. Prisoner-turn presses are ignored by
+      // 5-9: Watcher skills. Prisoner-turn presses are ignored by
       // handlePrisonerIntent, same one-role-per-turn split as 1-4 above.
       Digit5: () => this.onIntent("skill", "doubleBluff"),
       Digit6: () => this.onIntent("skill", "wideScan"),
@@ -170,9 +172,34 @@ export class Input {
   // and dispatches by mode.
   pollGamepad() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads && pads[0];
-    if (!pad) return;
-    const pressed = pad.buttons.map((b) => b.pressed);
+    const available = Array.from(pads || []).filter((p) => p && p.connected !== false);
+    if (!available.length) {
+      this.activePadIndex = null;
+      this.activePadKey = null;
+      this.padPrev = [];
+      this.padPressed = [];
+      return;
+    }
+
+    // Gamepad slots are stable only for the lifetime of one connection. A
+    // reconnect, Steam Input, or another virtual controller can leave slot 0
+    // empty/idle while the controller the player is pressing lives at 1-3.
+    // Prefer whichever pad has live activity, otherwise keep the last active
+    // pad, then fall back to the first connected one.
+    const hasActivity = (p) =>
+      Array.from(p.buttons || []).some((b) => b.pressed) ||
+      Array.from(p.axes || []).some((v) => Math.abs(v || 0) > 0.5);
+    const pad = available.find(hasActivity) ||
+      available.find((p) => p.index === this.activePadIndex) || available[0];
+    const padKey = `${pad.index}:${pad.id || "gamepad"}`;
+    if (padKey !== this.activePadKey) {
+      this.activePadIndex = pad.index;
+      this.activePadKey = padKey;
+      this.padPrev = [];
+      this._stickHeld = false;
+    }
+
+    const pressed = Array.from(pad.buttons || [], (b) => !!b.pressed);
     this.padPressed = pressed; // for isPadHeld(), regardless of mode below
     const prev = this.padPrev;
     const edge = (i) => pressed[i] && !prev[i];
@@ -191,7 +218,8 @@ export class Input {
     }
 
     if (this.mode === "intro") {
-      // Requires a HOLD (X, index 2) — read via isPadHeld() and polled in
+      // Requires a hold on a standard confirm button — read via isPadHeld()
+      // and polled in
       // main.js's loop(), not dispatched from here on an edge.
       this.padPrev = pressed;
       return;
