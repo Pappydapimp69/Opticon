@@ -38,8 +38,8 @@ export const SKILL_INFO = Object.freeze({
   [SKILLS.LOCK]: { label: "Remote lock", icon: "🔒", cooldown: 4 },
   [SKILLS.DISPATCH]: { label: "Dispatch guards", icon: "🚨", cooldown: 4 },
 });
-export const GUARD_SPEED = 5; // tiles/turn — faster than a prisoner's MP_PER_TURN
-export const GUARD_LIFESPAN = 6; // turns a dispatched pair searches before recalled
+export const GUARD_SPEED = 5; // baseline (medium-tier) tiles/turn — faster than a prisoner's MP_PER_TURN
+export const GUARD_LIFESPAN = 6; // baseline (medium-tier) turns a dispatched pair searches before recalled
 // Hard cap on turns. A game with no cap can in principle run forever
 // against a passive human Prisoner, and the Watcher had no win condition of
 // last resort. Chosen from the balance sim's own distribution rather than
@@ -111,6 +111,14 @@ export function createGame(map, opts = {}) {
     map,
     prisoners,
     activePrisoner: 0,
+    // Resolved DISPATCH strength tier (see DISPATCH_TIER below). Resolved
+    // ONCE here rather than re-derived per call: DISPATCH is a Watcher-only
+    // tool used by exactly one side per game, but which raw difficulty value
+    // maps to "weak guards" vs "strong guards" still depends on whether the
+    // Watcher seat is human or AI (see main.js's dispatchTierFor) — settling
+    // that once at game start keeps both the human skill-use path and the
+    // AI's pickSkills path reading the same already-inverted answer.
+    dispatchTier: opts.dispatchTier || "medium",
     watcher: {
       facing: opts.watcherFacing ?? 0,
       bluff: null, // a direction index the Watcher claims to also be watching
@@ -571,7 +579,8 @@ export function useSkill(game, skill, arg) {
   if (!SKILL_INFO[skill]) return { ok: false, reason: "unknown-skill" };
   if (!skillReady(game, skill)) return { ok: false, reason: "cooling-down" };
 
-  const spend = () => (game.watcher.skills[skill] = SKILL_INFO[skill].cooldown);
+  const spend = (cooldownOverride) =>
+    (game.watcher.skills[skill] = cooldownOverride ?? SKILL_INFO[skill].cooldown);
 
   if (skill === SKILLS.DOUBLE_BLUFF) {
     // Needs a first bluff to be a SECOND one — otherwise it's just setBluff.
@@ -613,16 +622,17 @@ export function useSkill(game, skill, arg) {
     const post = game.map.guardPosts[arg];
     // Stable per-guard id so the renderer can track a mesh across moves
     // instead of re-keying by position (which changes every round).
+    const params = dispatchParams(game);
     const w = game.watcher;
     w._guardSeq = (w._guardSeq || 0) + 1;
     const id1 = w._guardSeq;
     w._guardSeq += 1;
     const id2 = w._guardSeq;
     game.watcher.guards.push(
-      { id: id1, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN },
-      { id: id2, x: post.x, y: post.y, quadrant: arg, life: GUARD_LIFESPAN }
+      { id: id1, x: post.x, y: post.y, quadrant: arg, life: params.lifespan },
+      { id: id2, x: post.x, y: post.y, quadrant: arg, life: params.lifespan }
     );
-    spend();
+    spend(params.cooldown);
     logMsg(game, `Guards dispatched to the ${DIRS[arg]} quadrant.`);
     return { ok: true, event: "dispatch", quadrant: arg };
   }
@@ -650,7 +660,7 @@ export function useSkill(game, skill, arg) {
   return { ok: false, reason: "unknown-skill" };
 }
 
-function quadrantOf(game, x, y) {
+export function quadrantOf(game, x, y) {
   const { center } = game.map;
   const dx = x - center.x, dy = y - center.y;
   if (dx === 0 && dy === 0) return 0;
@@ -662,6 +672,30 @@ function quadrantOf(game, x, y) {
 // shorter than the map — a guard is a physical patroller, not the tower;
 // its threat is "don't let one round a corner near you", not omniscience.
 export const GUARD_SIGHT_RANGE = 5;
+
+// DISPATCH's own difficulty lever (Tension T25 follow-up). Unlike the
+// passive gaze rule's exposureTier — which is SYMMETRIC (whoever holds the
+// tower is bound by it) and so risks inverting who a difficulty change
+// favors — DISPATCH is a Watcher-only tool fired by exactly one side per
+// game, never both. That makes the table itself safe to write as plain
+// STRENGTH tiers; any human-vs-AI role inversion (harder should mean
+// weaker guards for a human Watcher, stronger for an AI one) is resolved
+// once in main.js and stored pre-inverted on game.dispatchTier, so
+// everything reading this table just gets the right answer for free.
+export const DISPATCH_TIER = Object.freeze({
+  easy: { speed: 4, lifespan: 5, cooldown: 5, sightRange: 4 },
+  medium: {
+    speed: GUARD_SPEED,
+    lifespan: GUARD_LIFESPAN,
+    cooldown: SKILL_INFO[SKILLS.DISPATCH].cooldown,
+    sightRange: GUARD_SIGHT_RANGE,
+  },
+  hard: { speed: 6, lifespan: 7, cooldown: 3, sightRange: 6 },
+});
+
+export function dispatchParams(game) {
+  return DISPATCH_TIER[game.dispatchTier] || DISPATCH_TIER.medium;
+}
 
 // Any-angle line of sight between two tiles, capped at `maxRange` — this is
 // the guards' capture condition instead of the tower's lit-OR-noise
@@ -694,6 +728,7 @@ export function hasLineOfSight(game, ax, ay, bx, by, maxRange = GUARD_SIGHT_RANG
 // strand a permanent hazard on the map).
 export function moveGuards(game) {
   const w = game.watcher;
+  const params = dispatchParams(game);
   for (const guard of w.guards) {
     guard.life -= 1;
     let target = null, bestTtl = -1;
@@ -704,14 +739,14 @@ export function moveGuards(game) {
     if (target) {
       const path = bfsPath(game.map, guard.x, guard.y, target.x, target.y, null);
       if (path && path.length > 1) {
-        const steps = Math.min(GUARD_SPEED, path.length - 1);
+        const steps = Math.min(params.speed, path.length - 1);
         guard.x = path[steps].x;
         guard.y = path[steps].y;
       }
     }
     for (const p of game.prisoners) {
       if (!p.alive || p.escaped) continue;
-      if (hasLineOfSight(game, guard.x, guard.y, p.x, p.y)) {
+      if (hasLineOfSight(game, guard.x, guard.y, p.x, p.y, params.sightRange)) {
         p.alive = false;
         logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
       }

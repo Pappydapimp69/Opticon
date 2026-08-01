@@ -30,7 +30,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.39.0";
+const BUILD = "beta-0.40.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -487,7 +487,11 @@ function startGame(overrides = {}) {
   app.config.seed = (Math.floor(Math.random() * 1e9) >>> 0) || 1;
   const prisonerCount = app.config.mode === "hotseat" ? 1 : PRISONER_COUNT;
   const map = generateMap(app.config.seed, { ...MAP_DEFAULTS, prisonerCount });
-  app.game = createGame(map, { watcherFacing: 0, prisoners: map.spawns });
+  app.game = createGame(map, {
+    watcherFacing: 0,
+    prisoners: map.spawns,
+    dispatchTier: dispatchTierFor(),
+  });
   app.game.prisoners.forEach((p) => (p.mpMax = 3));
   animatingPrisoner = 0;
   armedItem = null;
@@ -1289,6 +1293,25 @@ function prisonerSkillTier() {
 // Tier it by difficulty only when the human is the one being hunted.
 function exposureTier() {
   return app.config.humanRole === "Watcher" ? "medium" : app.config.difficulty;
+}
+
+// DISPATCH is NOT symmetric like the capture rule above — it's a tool only
+// whichever side holds the tower ever fires, human or AI, never both in one
+// game. So there's no "who does this favor" ambiguity to dodge by holding a
+// neutral baseline. But the SAME difficulty word still needs OPPOSITE guard
+// strength depending on who's playing Watcher: "hard" should mean weaker
+// guards when a human has to use them well (a harder tool to lean on, same
+// spirit as prisonerSkillTier sharpening the AI on hard), and stronger
+// guards when the AI wields them against a human prisoner (consistent with
+// exposureTier and watcherAI's own DIFFICULTY table already scaling up
+// against the prisoner on hard). One flip at game start settles it for both
+// the human skill-use path and watcherAI's pickSkills.
+function dispatchTierFor() {
+  const d = app.config.difficulty;
+  if (app.config.humanRole !== "Watcher") return d; // AI Watcher: hard = strong guards, as authored
+  if (d === "hard") return "easy";
+  if (d === "easy") return "hard";
+  return "medium";
 }
 
 // The in-game AI prisoner uses the shared BFS pathing policy. After it acts we
