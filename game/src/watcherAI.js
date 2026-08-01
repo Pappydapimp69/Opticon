@@ -19,6 +19,7 @@ import {
   useSkill,
   skillUsable,
   objAt,
+  quadrantOf,
   SKILLS,
 } from "./rules.js";
 import { makeRng } from "./map.js";
@@ -146,6 +147,8 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1, exposureT
       }
     } else if (s === SKILLS.LOCK) {
       arg = firstOpenDoor(game);
+    } else if (s === SKILLS.DISPATCH) {
+      arg = pickDispatchQuadrant(game);
     }
     const r = useSkill(game, s, arg);
     if (r.ok) actions.push({ type: "skill", skill: s });
@@ -167,11 +170,29 @@ export function playWatcherTurn(game, difficulty = "medium", seed = 1, exposureT
 function pickSkills(game, tuning, rng) {
   if (rng() >= (tuning.skillUse ?? 0.35)) return [];
   // Preference order reflects value: catching someone beats setting up.
-  const order = [SKILLS.WIDE_SCAN, SKILLS.ECHO, SKILLS.DOUBLE_BLUFF, SKILLS.LOCK];
+  // DISPATCH leads — unlike a scan/bluff/lock, it's an independent capture
+  // roll that doesn't depend on this turn's own gaze wedge landing right.
+  const order = [SKILLS.DISPATCH, SKILLS.WIDE_SCAN, SKILLS.ECHO, SKILLS.DOUBLE_BLUFF, SKILLS.LOCK];
   for (const s of order) {
     if (skillUsable(game, s)) return [s];
   }
   return [];
+}
+
+// Send guards where the evidence points: the freshest live noise tile's
+// quadrant, same target-selection logic moveGuards uses once they're
+// walking. With nothing to go on yet, fall back to wherever the AI's own
+// blended suspicion runs highest — never a blind/random guess.
+function pickDispatchQuadrant(game) {
+  let best = null, bestTtl = -1;
+  for (const n of game.noise) {
+    if (n.ttl > bestTtl) { bestTtl = n.ttl; best = quadrantOf(game, n.x, n.y); }
+  }
+  if (best != null) return best;
+  const s = game.watcher.suspicion;
+  let idx = 0;
+  for (let i = 1; i < 4; i++) if (s[i] > s[idx]) idx = i;
+  return idx;
 }
 
 function firstOpenDoor(game) {

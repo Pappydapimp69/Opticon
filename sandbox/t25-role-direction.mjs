@@ -12,14 +12,21 @@ const N = 240, TIERS = ["easy","medium","hard"];
 // makes tiers that differ only by probability look identical.
 function seeded(seed){let a=seed>>>0;return()=>{a|=0;a=(a+0x6d2b79f5)|0;let t=Math.imul(a^(a>>>15),1|a);
  t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
-// Watcher-role human: prisoner skill = tier, exposure pinned to medium.
+// DISPATCH is Watcher-only and asymmetric (only one side ever fires it), but
+// the same difficulty word still needs an opposite guard-strength mapping
+// depending on who's IN the tower — mirrors main.js's dispatchTierFor.
+function dispatchTierForWatcherRole(tier){if(tier==="hard")return"easy";if(tier==="easy")return"hard";return"medium";}
+// Watcher-role human: prisoner skill = tier, exposure pinned to medium, and
+// DISPATCH — fired by the human's own Watcher seat here — uses the inverted
+// tier (hard difficulty = weaker guards for the human to lean on).
 function watcherRole(tier){let cap=0;for(let i=0;i<N;i++){const seed=(i*2654435761)>>>0||1;
- const map=generateMap(seed,{...MAP_DEFAULTS,prisonerCount:3});const g=createGame(map,{watcherFacing:seed%4,prisoners:map.spawns});const rng=seeded(seed^0x9e3779b9);
+ const map=generateMap(seed,{...MAP_DEFAULTS,prisonerCount:3});const g=createGame(map,{watcherFacing:seed%4,prisoners:map.spawns,dispatchTier:dispatchTierForWatcherRole(tier)});const rng=seeded(seed^0x9e3779b9);
  let guard=200;while(!isOver(g)&&guard-->0){prisonerAITurn(g,rng,tier);if(isOver(g))break;endPrisonerTurn(g);if(isOver(g))break;
  playWatcherTurn(g,"medium",seed,"medium");}if(g.status==="captured")cap++;}return cap/N*100;}
-// Prisoner-role human: exposure = tier (unchanged behaviour).
+// Prisoner-role human: exposure = tier, DISPATCH = tier directly (AI holds
+// the tower here, so "hard" should mean strong guards, unchanged).
 function prisonerRole(tier){let cap=0;for(let i=0;i<N;i++){const seed=(i*2654435761)>>>0||1;
- const map=generateMap(seed,{...MAP_DEFAULTS,prisonerCount:3});const g=createGame(map,{watcherFacing:seed%4,prisoners:map.spawns});const rng=seeded(seed^0x9e3779b9);
+ const map=generateMap(seed,{...MAP_DEFAULTS,prisonerCount:3});const g=createGame(map,{watcherFacing:seed%4,prisoners:map.spawns,dispatchTier:tier});const rng=seeded(seed^0x9e3779b9);
  let guard=200;while(!isOver(g)&&guard-->0){prisonerAITurn(g,rng,"medium");if(isOver(g))break;endPrisonerTurn(g);if(isOver(g))break;
  playWatcherTurn(g,tier,seed,tier);}if(g.status==="captured")cap++;}return cap/N*100;}
 console.log("HUMAN = WATCHER (goal: capture rate should FALL as difficulty rises — prey gets better)");
