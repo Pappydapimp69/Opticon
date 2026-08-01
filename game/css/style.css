@@ -301,6 +301,15 @@ html, body {
 .item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }
 .stat .val.urgent { color: #ff6b6b; animation: dangerPulse 1s ease-in-out infinite; }
 
+/* ---- Zone (which quadrant the human prisoner is in) ---------------------
+   Reuses dangerPulse rather than inventing a second alarm animation, so a
+   swept quadrant reads with the same visual grammar as the round-limit
+   warning the player has already learned. Colour matches the guard mesh
+   (COLORS.guard in render.js) so the HUD warning and the thing on the
+   ground are recognisably the same threat. */
+.val.zone { letter-spacing: .04em; }
+.val.zone.hunted { color: #ff5c1a; animation: dangerPulse 1s ease-in-out infinite; }
+
 /* ---- Crew roster (who is still in play) --------------------------------- */
 .val.roster { display: inline-flex; gap: 5px; letter-spacing: 0; }
 .roster .pip { font-size: 15px; line-height: 1; transition: opacity .2s; }
