@@ -10,7 +10,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const require = createRequire(import.meta.url);
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+const playwrightPath = process.env.PLAYWRIGHT_PATH || "/opt/node22/lib/node_modules/playwright";
+const chromiumPath = process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+const { chromium } = require(playwrightPath);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -37,12 +39,21 @@ function check(cond, label) {
   if (!cond) ok = false;
 }
 
+async function pollUntil(page, predicate, timeoutMs = 6000, arg) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await page.evaluate(predicate, arg)) return true;
+    await page.waitForTimeout(100);
+  }
+  return false;
+}
+
 (async () => {
   const server = serve();
   await new Promise((r) => server.listen(PORT, r));
 
   const browser = await chromium.launch({
-    executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+    executablePath: chromiumPath,
     args: ["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist", "--no-sandbox"],
   });
   const errors = [];
@@ -53,8 +64,11 @@ function check(cond, label) {
   // Inject a fake, mutable gamepad BEFORE navigation so pollGamepad() (rAF
   // driven, in main.js's loop()) picks it up from frame one.
   await page.addInitScript(() => {
-    window.__pad = { buttons: Array.from({ length: 16 }, () => ({ pressed: false })), axes: [0, 0], index: 0, id: "fake", connected: true, mapping: "standard", timestamp: 0 };
-    navigator.getGamepads = () => [window.__pad, null, null, null];
+    // Slot 0 is deliberately empty. Browsers retain slot identity across a
+    // connection and reconnects/virtual pads commonly put the live device at
+    // 1-3; production must discover it instead of assuming pads[0].
+    window.__pad = { buttons: Array.from({ length: 16 }, () => ({ pressed: false })), axes: [0, 0], index: 2, id: "fake", connected: true, mapping: "standard", timestamp: 0 };
+    navigator.getGamepads = () => [null, null, window.__pad, null];
     window.dispatchEvent(new Event("gamepadconnected"));
   });
 
@@ -64,20 +78,19 @@ function check(cond, label) {
   // Clear the intro splash with a genuine X-button hold (index 2), same as
   // hold-to-confirm.mjs, so the menu screen is what's under test.
   await page.evaluate(() => { window.__pad.buttons[2].pressed = true; });
-  await page.waitForTimeout(750);
+  const menuOpened = await pollUntil(page, () => !document.getElementById("menu").classList.contains("hidden"));
   await page.evaluate(() => { window.__pad.buttons[2].pressed = false; });
-  await page.waitForTimeout(700);
-  const introHidden = await page.$eval("#intro", (el) => el.classList.contains("hidden"));
-  check(introHidden, "intro dismissed via gamepad X hold (setup)");
+  check(menuOpened, "intro dismissed via gamepad X hold (setup)");
 
   // Press+release a single button edge (two poll frames apart).
   async function tap(i) {
     await page.evaluate((idx) => { window.__pad.buttons[idx].pressed = true; }, i);
-    await page.waitForTimeout(80);
+    const sawPress = await pollUntil(page, (idx) => !!window.__opticon.input.padPrev[idx], 1500, i);
     await page.evaluate((idx) => { window.__pad.buttons[idx].pressed = false; }, i);
-    await page.waitForTimeout(80);
+    const sawRelease = await pollUntil(page, (idx) => !window.__opticon.input.padPrev[idx], 1500, i);
+    if (!sawPress || !sawRelease) throw new Error(`gamepad button ${i} was not polled through a full edge`);
   }
-  const DOWN = 13, A = 0;
+  const DOWN = 13, A = 0, START = 9;
 
   // Difficulty (row 0/1 depending on markup) → play mode → sound → Start →
   // How to play: walk all the way down with dpad-down and confirm the focus
@@ -102,12 +115,22 @@ function check(cond, label) {
   check(openAfter, "gamepad A on the focused summary opens How-to-play");
 
   // Difficulty/mode nav must still work after this change (regression check).
-  await page.evaluate(() => { window.__pad.buttons[12].pressed = true; }); // dpad up, back toward top rows
-  await page.waitForTimeout(80);
-  await page.evaluate(() => { window.__pad.buttons[12].pressed = false; });
-  await page.waitForTimeout(80);
+  await tap(12); // dpad up, back toward the Start row
   const stillInGrid = await page.evaluate(() => !!document.querySelector("#menu .gpfocus"));
   check(stillInGrid, "dpad-up still moves focus back up the grid (no regression)");
+
+  // We are now on the Start row. Menu confirm accepts both A and Start, so
+  // the sustained hold must honor both too. Previously Start's edge could
+  // focus/select controls but pollStartHold() watched only A, leaving the
+  // player stranded on the final "Hold to Start" action.
+  const focusedStart = await page.evaluate(() => document.querySelector("#menu .gpfocus")?.id === "btnStart");
+  check(focusedStart, "dpad-up lands on the Hold to Start button");
+  await tap(START);
+  check(!(await page.evaluate(() => !!window.__opticon.game)), "a short Start-button tap does not launch the game");
+  await page.evaluate((idx) => { window.__pad.buttons[idx].pressed = true; }, START);
+  const launchedWithStart = await pollUntil(page, () => !!window.__opticon.game, 1800);
+  await page.evaluate((idx) => { window.__pad.buttons[idx].pressed = false; }, START);
+  check(launchedWithStart, "holding gamepad Start launches the game");
 
   check(errors.length === 0, `no console errors (${errors.length} found)`);
   errors.slice(0, 10).forEach((e) => console.log("    •", e));

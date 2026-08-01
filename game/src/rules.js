@@ -766,6 +766,10 @@ export function moveGuards(game) {
 
 export function setBluff(game, dir) {
   if (game.turn !== "Watcher" || game.status !== "playing") return { ok: false };
+  // Wide Scan's stated price is giving up misdirection for coverage. Clearing
+  // the existing bluff when the skill is armed is not enough if a player can
+  // simply add a new one afterward, so the restriction lasts through scan.
+  if (game.watcher.wideScan) return { ok: false, reason: "wide-scan-armed" };
   game.watcher.bluff = dir;
   logMsg(game, `Watcher declares eyes on ${DIRS[dir]}...`);
   return { ok: true };

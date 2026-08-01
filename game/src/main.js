@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.42.0";
+const BUILD = "beta-0.43.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -71,6 +71,11 @@ const app = {
   lastT: 0,
   aiThinking: false,
   cutsceneActive: false,
+  // Targeted Watcher skills use one explicit two-step interaction:
+  // activate the skill, then choose a direction. Keeping the pending skill
+  // in one slot prevents Dispatch and Double Bluff from competing for the
+  // same next direction press.
+  armedSkill: null,
 };
 
 // Persisted across sessions: difficulty pick + audio volume. Small and
@@ -209,7 +214,9 @@ let startPointerDown = false;
 function pollIntroHold(t) {
   if (introDone) return;
   const fill = document.getElementById("introHoldFill");
-  const held = app.input.isHeld("Space") || app.input.isPadHeld(2) || introPointerDown;
+  const held = app.input.isHeld("Space") ||
+    app.input.isPadHeld(0) || app.input.isPadHeld(2) || app.input.isPadHeld(9) ||
+    introPointerDown;
   if (held) {
     if (introHeldSince == null) introHeldSince = t;
     const p = Math.min(1, (t - introHeldSince) / HOLD_MS);
@@ -234,7 +241,8 @@ function pollStartHold(t) {
   const focusedOnStart = currentFocusEl() === btn;
   const held =
     startPointerDown ||
-    (focusedOnStart && (app.input.isHeld("Space") || app.input.isHeld("Enter") || app.input.isPadHeld(0)));
+    (focusedOnStart && (app.input.isHeld("Space") || app.input.isHeld("Enter") ||
+      app.input.isPadHeld(0) || app.input.isPadHeld(9)));
   if (held) {
     if (startHeldSince == null) startHeldSince = t;
     const p = Math.min(1, (t - startHeldSince) / HOLD_MS);
@@ -482,6 +490,7 @@ function applyVolumeUI() {
 function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
   app.stagedPath = [];
+  app.armedSkill = null;
   breakArmed = false;
   updateBreakToggleUI();
   // Fresh seed each game for variety, but reproducible within a game.
@@ -574,6 +583,7 @@ function hintFor() {
   if (prisoner ? !humanControlsPrisoner() : !humanControlsWatcher()) {
     return prisoner ? "Watching the Prisoner's turn…" : "Watching the Watcher's turn…";
   }
+  if (!prisoner && app.armedSkill) return targetedSkillHint(app.armedSkill, scheme);
   const staged = app.stagedPath.length > 0;
   // Only advertise item controls when something is actually carried —
   // otherwise the hint teaches a verb the player has no way to perform yet.
@@ -585,7 +595,7 @@ function hintFor() {
         ? "Stick / D-pad: extend or undo the path  ·  A: commit the move  ·  Start: change view"
         : "Left stick / D-pad: plan a path  ·  A: end turn  ·  Hold RB + direction: break a window" + (carrying ? "  ·  LT: pick item, RT: use" : "") + "  ·  Start: change view";
     }
-    return "LB / RB: rotate gaze  ·  Y / B / X: bluff  ·  LT: pick skill, RT: use  ·  A: scan & end turn  ·  Start: change view";
+    return "LB / RB: rotate gaze  ·  D-pad: bluff/target  ·  LT: pick skill, RT: arm/use  ·  A: scan & end turn  ·  Start: change view";
   }
   if (scheme === "touch") {
     if (prisoner) {
@@ -593,14 +603,14 @@ function hintFor() {
         ? "Tap arrows to extend/undo the path  ·  Commit: move for real  ·  View: change camera"
         : "Tap arrows to plan a path  ·  💥: arm a window break, then tap a direction" + (carrying ? "  ·  tap an item, then a direction" : "") + "  ·  End: end turn  ·  View: change camera";
     }
-    return "Rotate / bluff with the buttons  ·  tap a skill to use it  ·  Scan: end turn  ·  View: change camera";
+    return "Rotate / bluff with the buttons  ·  tap a skill to arm/use it  ·  targeted skills then need a direction  ·  Scan: end turn";
   }
   if (prisoner) {
     return staged
       ? "WASD / arrows: extend or undo the path  ·  Space: commit the move  ·  V: view"
       : "WASD / arrows: plan a path  ·  Shift + direction: break a window" + (carrying ? "  ·  1-2: use an item" : "") + "  ·  Space: end turn  ·  V: view  ·  reach the green gate";
   }
-  return "Q / E: rotate 90°  ·  1-4: bluff  ·  5-8: skills  ·  Space: scan & end turn  ·  V: view";
+  return "Q / E: rotate 90°  ·  1-4: bluff/target  ·  5-9: skills  ·  Space: scan & end turn  ·  V: view";
 }
 
 // ---- Intent handling -----------------------------------------------------
@@ -903,26 +913,55 @@ function updateItemBar() {
 
 // ---- Watcher skills ------------------------------------------------------
 
-// WIDE_SCAN/ECHO need no target. LOCK needs an open door — rather than
-// building a door-picker, it targets the open door nearest the Watcher's
-// current facing wedge, which is the one a player aiming that way means.
+function targetedSkillHint(skill, scheme = app.input?.activeScheme || "keyboard") {
+  const targetControl = scheme === "gamepad" ? "press a D-pad direction" :
+    scheme === "touch" ? "tap a direction" : "press 1-4";
+  return skill === SKILLS.DOUBLE_BLUFF
+    ? `Double Bluff armed — ${targetControl} for the second claim`
+    : `Dispatch armed — ${targetControl} to pick a quadrant`;
+}
+
+function skillUnavailableHint(g, skill) {
+  const info = SKILL_INFO[skill];
+  const cd = g.watcher.skills[skill] || 0;
+  if (cd > 0) return `${info.label} is cooling down (${cd} turn${cd === 1 ? "" : "s"})`;
+  if (skill === SKILLS.DOUBLE_BLUFF) return "Double Bluff needs a first bluff — make one, then activate the skill";
+  if (skill === SKILLS.ECHO) return "Echo Memory needs an active noise trace to refresh";
+  if (skill === SKILLS.LOCK) return "Remote Lock needs an open, unoccupied door";
+  return `${info.label} cannot be used right now`;
+}
+
+function showSkillResult(skill, result) {
+  if (!result.ok) {
+    if (result.reason === "same-direction") return "Double Bluff needs a different second direction";
+    if (result.reason === "occupied") return "Remote Lock cannot close a door occupied by a prisoner";
+    return skillUnavailableHint(app.game, skill);
+  }
+  if (result.event === "wide-scan") return "Wide Scan armed — Scan & End Turn to sweep 180°";
+  if (result.event === "echo") return `Echo Memory refreshed ${result.refreshed} noise trace${result.refreshed === 1 ? "" : "s"}`;
+  if (result.event === "lock") return "Remote Lock sealed the selected door";
+  if (result.event === "dispatch") return `Guards dispatched to the ${DIRS[result.quadrant]} quadrant`;
+  if (result.event === "double-bluff") return `Second bluff declared toward ${DIRS[result.dir]}`;
+  return hintFor();
+}
+
+// WIDE_SCAN/ECHO need no target. LOCK automatically targets the nearest
+// eligible open door. DOUBLE_BLUFF and DISPATCH share one explicit arm-then-
+// direction interaction across keyboard, touch, and gamepad.
 function doUseSkill(skill) {
   const g = app.game;
   if (!g || g.turn !== "Watcher") return;
-  if (skill !== SKILLS.DISPATCH && app.armedDispatch) {
-    // Using any OTHER skill while dispatch is armed abandons the gesture —
-    // otherwise a stray leftover arm silently hijacks the player's next
-    // bluff/direction press into a quadrant pick they didn't intend.
-    app.armedDispatch = false;
+  if (app.armedSkill && app.armedSkill !== skill) app.armedSkill = null;
+  if (!skillUsable(g, skill)) {
+    app.audio.play("blocked");
+    app.ui.hint(skillUnavailableHint(g, skill));
+    updateSkillBar();
+    return;
   }
-  if (skill === SKILLS.DISPATCH) {
-    // Needs a quadrant arg we don't have yet — arm it, then the next
-    // direction press (1-4, same keys as bluff) picks the quadrant. Mirrors
-    // the item/lockpick "arm, then press a direction" gesture already used
-    // on the Prisoner side.
-    if (!skillUsable(g, SKILLS.DISPATCH)) { app.audio.play("blocked"); return; }
-    app.armedDispatch = !app.armedDispatch; // press again to cancel
-    app.ui.hint(app.armedDispatch ? "Dispatch armed — press a direction (1-4) to pick a quadrant" : hintFor());
+  if (skill === SKILLS.DOUBLE_BLUFF || skill === SKILLS.DISPATCH) {
+    app.armedSkill = app.armedSkill === skill ? null : skill;
+    app.audio.play("ui");
+    app.ui.hint(app.armedSkill ? targetedSkillHint(skill) : hintFor());
     updateSkillBar();
     return;
   }
@@ -931,6 +970,7 @@ function doUseSkill(skill) {
     arg = nearestOpenDoorInGaze(g);
     if (!arg) {
       app.audio.play("blocked");
+      app.ui.hint("Remote Lock needs an open, unoccupied door");
       return;
     }
   }
@@ -949,7 +989,7 @@ function doUseSkill(skill) {
   }
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
-  app.ui.hint(hintFor());
+  app.ui.hint(showSkillResult(skill, r));
   updateCommitButton();
 }
 
@@ -997,22 +1037,20 @@ function updateSkillBar() {
     skill: s,
     cd: g.watcher.skills[s] || 0,
     usable: skillUsable(g, s),
+    unavailable: skillUnavailableHint(g, s),
   }));
-  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|") + `|${padSlot}|${app.armedDispatch ? 1 : 0}`;
+  const sig = entries.map((e) => `${e.skill}:${e.cd}:${e.usable ? 1 : 0}`).join("|") + `|${padSlot}|${app.armedSkill || ""}`;
   if (sig === _skillBarSig) return;
   _skillBarSig = sig;
   bar.classList.remove("empty");
   bar.innerHTML = entries
     .map((e, i) => {
       const info = SKILL_INFO[e.skill];
-      // Armed feedback matters most here: unlike items (which show an armed
-      // highlight already), DISPATCH needs a SECOND input (the quadrant) —
-      // without a visible cue a player who armed it and then can't tell why
-      // "nothing is happening" has no way to know it's mid-gesture.
-      const armed = e.skill === SKILLS.DISPATCH && app.armedDispatch;
+      const armed = e.skill === app.armedSkill;
       const cls = (e.cd > 0 ? " cooling" : e.usable ? "" : " unusable") + (padSlot === i ? " padsel" : "") + (armed ? " armed" : "");
       const badge = e.cd > 0 ? `<span class="cd">${e.cd}</span>` : `<span class="ik">${i + 5}</span>`;
-      return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${info.label}">` +
+      const title = e.usable ? info.label : `${info.label}: ${e.unavailable}`;
+      return `<button class="item-chip skill-chip${cls}" data-skill="${e.skill}" title="${title}" aria-label="${title}">` +
         `<span class="ic">${info.icon}</span>${badge}` +
         `<span class="iname">${info.label}</span></button>`;
     })
@@ -1178,23 +1216,30 @@ function handleWatcherIntent(intent, arg) {
   if (intent === "rotate") {
     if (rotateWatcher(g, arg).ok) app.audio.play("rotate");
   } else if (intent === "bluff") {
-    if (app.armedDispatch) {
-      // Same direction keys, reinterpreted: a quadrant pick for the armed
-      // DISPATCH skill instead of a claimed gaze direction.
-      app.armedDispatch = false;
-      const r = useSkill(g, SKILLS.DISPATCH, arg);
+    if (app.armedSkill === SKILLS.DOUBLE_BLUFF || app.armedSkill === SKILLS.DISPATCH) {
+      // Same direction controls, reinterpreted as the target for whichever
+      // explicit two-step skill the player armed.
+      const skill = app.armedSkill;
+      app.armedSkill = null;
+      const r = useSkill(g, skill, arg);
+      // A same-direction Double Bluff is a recoverable target mistake: keep
+      // the skill armed so the player can choose another direction directly.
+      if (!r.ok && skill === SKILLS.DOUBLE_BLUFF && r.reason === "same-direction") {
+        app.armedSkill = skill;
+      }
       app.audio.play(r.ok ? "skill" : "blocked");
       app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
-      app.ui.hint(hintFor());
+      app.ui.renderLog(g, shouldShowWatcherInfo());
+      app.ui.hint(showSkillResult(skill, r));
       updateSkillBar();
       return;
     }
-    // A second bluff this turn goes through the DOUBLE_BLUFF skill instead
-    // of overwriting the first — that's exactly what the skill buys.
-    if (g.watcher.bluff != null && arg !== g.watcher.bluff && skillUsable(g, SKILLS.DOUBLE_BLUFF)) {
-      if (useSkill(g, SKILLS.DOUBLE_BLUFF, arg).ok) app.audio.play("bluff");
-    } else if (setBluff(g, arg).ok) {
+    const r = setBluff(g, arg);
+    if (r.ok) {
       app.audio.play("bluff");
+    } else if (r.reason === "wide-scan-armed") {
+      app.audio.play("blocked");
+      app.ui.hint("Wide Scan is armed — its 180° sweep cannot be bluffed");
     }
   } else if (intent === "slotCursor") {
     // Same cursor, but on the Watcher's turn it indexes the skill row.
@@ -1205,7 +1250,7 @@ function handleWatcherIntent(intent, arg) {
   } else if (intent === "skill") {
     doUseSkill(arg);
   } else if (intent === "endTurn") {
-    app.armedDispatch = false;
+    app.armedSkill = null;
     // Scan (commit), then end turn.
     const scan = watcherScan(g, exposureTier());
     app.audio.play("scan");
@@ -1481,6 +1526,10 @@ function loop(t) {
     resetStagedPath();
     if (breakArmed) { breakArmed = false; updateBreakToggleUI(); }
     if (armedItem) { armedItem = null; updateItemBar(); }
+  }
+  if (app.game && app.game.turn !== "Watcher" && app.armedSkill) {
+    app.armedSkill = null;
+    updateSkillBar();
   }
   if (app.renderer && app.game) {
     const viewedPrisoner = app.game.prisoners[humanPrisonerIndex()];

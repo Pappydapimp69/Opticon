@@ -769,6 +769,9 @@ section("wide scan costs the bluff (telegraphed power)");
   ok(g.watcher.bluff === 2, "bluff is set first");
   useSkill(g, SKILLS.WIDE_SCAN, null);
   ok(g.watcher.bluff === null, "arming a wide scan clears the bluff");
+  const blockedBluff = setBluff(g, 1);
+  ok(!blockedBluff.ok && blockedBluff.reason === "wide-scan-armed", "wide scan prevents adding a replacement bluff before scanning");
+  ok(g.watcher.bluff === null, "wide scan remains bluff-free through the scan");
 }
 
 section("double bluff adds a SECOND claim, not a replacement");
