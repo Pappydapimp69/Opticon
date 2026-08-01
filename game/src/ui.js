@@ -42,7 +42,14 @@ export class UI {
   // `showWatcherInfo`: only true for whoever is legitimately "being" the
   // Watcher right now. The prisoner must never learn the true gaze this way
   // either — that's the entire point of the asymmetry.
-  updateHud(game, viewMode, humanRole, showWatcherInfo) {
+  // `humanControlsTurn`: a DIFFERENT question — is the human the one acting
+  // RIGHT NOW (vs an AI opponent, or an AI companion's own turn within a
+  // human-Prisoner group)? Gates which touch panel shows: the old code
+  // toggled purely on game.turn, so a human Watcher saw the Prisoner's full
+  // movement D-pad (and its on-screen hint text) appear during the AI's own
+  // turn — controls that would silently no-op if tapped, since input
+  // handling is already correctly gated elsewhere, but confusing to see.
+  updateHud(game, viewMode, humanRole, showWatcherInfo, humanControlsTurn) {
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
     // With AI companions in play, name which one is acting — otherwise a
     // group of 3 reads identically to a lone prisoner on the Turn stat.
@@ -65,8 +72,8 @@ export class UI {
     this.renderRoster(game);
 
     const prisonerTurn = game.turn === "Prisoner";
-    this.el.prisonerControls.classList.toggle("active", prisonerTurn);
-    this.el.watcherControls.classList.toggle("active", !prisonerTurn);
+    this.el.prisonerControls.classList.toggle("active", prisonerTurn && humanControlsTurn);
+    this.el.watcherControls.classList.toggle("active", !prisonerTurn && humanControlsTurn);
   }
 
   // `showWatcherInfo`: same gate as updateHud — only true for whoever is

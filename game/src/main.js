@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.41.0";
+const BUILD = "beta-0.42.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -291,7 +291,7 @@ function dismissPassDevice() {
   }
   app.running = true;
   app.input.mode = "game";
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -507,7 +507,7 @@ function startGame(overrides = {}) {
   app.audio.resume();
   app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
-  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(app.game, shouldShowWatcherInfo());
   updateCommitButton();
 
@@ -565,6 +565,15 @@ function hintFor() {
   if (!g) return "";
   const scheme = app.input ? app.input.activeScheme : "keyboard";
   const prisoner = g.turn === "Prisoner";
+  // The hint bar (and its device-specific touch/gamepad phrasing below)
+  // teaches controls for the role whose turn it is — but g.turn only says
+  // WHICH role is acting, not whether the human is the one acting. During
+  // an AI turn (the opponent, or an AI companion mid-group — activePrisoner
+  // != 0), those controls do nothing, so teaching them here just confuses
+  // a player watching the AI move. Same gate the touch/Zone HUD already use.
+  if (prisoner ? !humanControlsPrisoner() : !humanControlsWatcher()) {
+    return prisoner ? "Watching the Prisoner's turn…" : "Watching the Watcher's turn…";
+  }
   const staged = app.stagedPath.length > 0;
   // Only advertise item controls when something is actually carried —
   // otherwise the hint teaches a verb the player has no way to perform yet.
@@ -617,7 +626,7 @@ function handleIntent(intent, arg) {
   } else {
     handleWatcherIntent(intent, arg);
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
 }
 
@@ -633,6 +642,15 @@ function humanControlsPrisoner() {
 }
 function humanControlsWatcher() {
   return app.config.mode === "hotseat" || app.config.humanRole === "Watcher";
+}
+// Is the human the one acting RIGHT NOW — as opposed to an AI opponent, or
+// (single-player Prisoner mode) an AI companion's own turn within the human's
+// group? Distinct from shouldShowWatcherInfo, which gates screen-secrecy
+// (what a role is allowed to SEE) rather than input (who's allowed to ACT).
+function humanControlsCurrentTurn() {
+  const g = app.game;
+  if (!g) return false;
+  return g.turn === "Prisoner" ? humanControlsPrisoner() : humanControlsWatcher();
 }
 
 // The prisoner index whose eyes the human is watching through — always 0
@@ -742,7 +760,7 @@ function doBreakWindow(dir) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -799,7 +817,7 @@ function doUseItem(kind, dirOrNull) {
     app.audio.play("blocked");
   }
   updateItemBar();
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -929,7 +947,7 @@ function doUseSkill(skill) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1083,7 +1101,7 @@ function stagePathExtend(dir) {
       if (r.ok) {
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
-        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
         app.ui.renderLog(g, shouldShowWatcherInfo());
       }
     } else {
@@ -1124,7 +1142,7 @@ function commitStagedPath() {
   app.stagedPath = [];
   animatingPrisoner = g.activePrisoner;
   app.renderer.walkTo(animatingPrisoner, fromTile, walkSteps);
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1166,7 +1184,7 @@ function handleWatcherIntent(intent, arg) {
       app.armedDispatch = false;
       const r = useSkill(g, SKILLS.DISPATCH, arg);
       app.audio.play(r.ok ? "skill" : "blocked");
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
       app.ui.hint(hintFor());
       updateSkillBar();
       return;
@@ -1239,7 +1257,7 @@ function scheduleAiWatcher() {
     }
     app.aiThinking = false;
     checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
     app.ui.renderLog(g, shouldShowWatcherInfo());
     // playWatcherTurn already advanced to the next prisoner internally — if
     // that's a companion (not prisoner 0), its AI turn plays automatically
@@ -1280,7 +1298,7 @@ function scheduleAiPrisoner() {
       endPrisonerTurn(g);
       app.aiThinking = false;
       checkOver();
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
       // endPrisonerTurn always hands off to the Watcher — but with AI
       // companions, this can fire in single-player Prisoner mode too, where
       // the Watcher is ALSO AI, not the human waiting on this banner.
@@ -1394,7 +1412,7 @@ function cycleView() {
 function setView(mode) {
   app.viewMode = mode;
   app.renderer.setViewMode(mode);
-  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo());
+  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
 }
 
 // ---- End condition -------------------------------------------------------
