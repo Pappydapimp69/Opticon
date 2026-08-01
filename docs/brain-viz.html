@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Opticon — the archive watches itself</title>
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(14, 18, 30, 0.86);
+    --panel-solid: #0e121e;
+    --prisoner: #5ad4e6;
+    --watcher: #ff6b7a;
+    --exit: #59f7a6;
+    --idea: #ffb020;
+    --text: #dfe8f7;
+    --muted: #8595b0;
+    --line: rgba(120, 150, 200, 0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: radial-gradient(ellipse at 50% 40%, #0a0f1c 0%, var(--bg) 65%);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  header { text-align: center; padding: 28px 16px 8px; }
+  header h1 {
+    margin: 0; font-size: 26px; letter-spacing: .12em; font-weight: 700;
+    color: var(--prisoner); text-shadow: 0 0 18px rgba(90, 212, 230, .35);
+  }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .stage { display: flex; justify-content: center; padding: 8px 16px 40px; }
+  svg { max-width: 920px; width: 100%; height: auto; overflow: visible; }
+  .ring-guide { fill: none; stroke: var(--line); stroke-width: 1; }
+  .sweep { transform-origin: 450px 450px; animation: spin 22s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tower-body { fill: var(--panel-solid); stroke: var(--prisoner); stroke-width: 2; }
+  .tower-iris { fill: none; stroke: var(--prisoner); stroke-width: 2; opacity: .8; }
+  .tower-pupil { fill: var(--watcher); }
+  .node { cursor: pointer; transition: r .12s ease, opacity .12s ease; }
+  .node:hover, .node.pinned { filter: drop-shadow(0 0 6px currentColor); }
+  .arc { cursor: pointer; transition: opacity .12s ease; }
+  .arc:hover, .arc.pinned { opacity: 1 !important; filter: drop-shadow(0 0 6px currentColor); }
+  .ring-label { fill: var(--muted); font-size: 11px; letter-spacing: .08em; }
+  #tip {
+    position: fixed; max-width: 320px; pointer-events: none; z-index: 10;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 12.5px; line-height: 1.45; color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); opacity: 0; transition: opacity .1s ease;
+    backdrop-filter: blur(6px);
+  }
+  #tip.show { opacity: 1; }
+  #tip .tt { font-weight: 700; margin-bottom: 4px; }
+  #tip .tk { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .legend {
+    display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
+    padding: 0 16px 30px; font-size: 12px; color: var(--muted);
+  }
+  .legend .item { display: flex; align-items: center; gap: 7px; }
+  .swatch { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 0 16px 30px; opacity: .7; }
+  footer code { color: var(--prisoner); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>OPTICON</h1>
+    <p id="subtitle">the archive watches itself</p>
+  </header>
+  <div class="stage"><svg id="viz" viewBox="0 0 900 900" role="img" aria-label="Radial view of Opticon's Brain-linked memory, tensions, and ideas"></svg></div>
+  <div class="legend" id="legend"></div>
+  <footer>
+    generated <span id="gendate"></span> · regenerate with <code>node tools/brain-viz.mjs</code>
+    · inner ring: tensions (red=open, amber=leaning, green=resolved) · middle ring: memory lessons · outer ring: idea kernels
+  </footer>
+  <div id="tip"></div>
+
+<script>
+const DATA = {"memory":[{"id":"E1","title":"reachability vs rules tests","date":"2026-07-23","tags":["gamedev","testing","ai","balance","pathfinding","simulation"],"what":"All per-move rules unit tests passed (203 assertions) yet the game objective was unreachable — a simulator running 900 full headless games showed a 0% escape rate that step-level tests never caught.","rule":"For any goal-directed system (game objective, agent task, workflow), add a reachability/outcome test that runs the whole thing to a terminal state many times, separate from correctness tests of the steps — \"every step is correct\" does not imply \"the goal is reachable\".","verified":true},{"id":"E2","title":"threejs fog culls overview","date":"2026-07-23","tags":["gamedev","3d","threejs","rendering","camera"],"what":"The atmospheric close-up camera looked correct, but switching to the overview/top camera rendered a completely black screen with no error and no warning.","rule":"When a 3D scene renders blank only from certain camera distances, suspect fog far (or the camera near/far clip planes) before the scene graph; scale distance-based effects to the camera that is actually active.","verified":true},{"id":"E3","title":"github pages deploy default branch","date":"2026-07-24","tags":["devops","ci","github-actions","github-pages","deployment"],"what":"Automating a GitHub Pages deploy for a static browser game cost an extra full build-fix-retry cycle because of two non-obvious platform constraints that surface late (only at deploy time), not at authoring time.","rule":"For GitHub Pages via Actions, plan to deploy from the DEFAULT branch — the github-pages environment blocks non-default branches by default, and it fails at deploy setup (0 steps, 404 log), not at authoring. Also: enabling/reading Pages may be blocked over a restricted API proxy, so drive it from inside the workflow (configure-pages enablement:true), and always curl the final URL to confirm it serves.","verified":true},{"id":"E4","title":"flat menu list nav leak","date":"2026-07-25","tags":["gamedev","ui","input","gamepad","gamedesign"],"what":"A gamepad/keyboard menu bug reported as \"every button except one launches the game directly\" turned out to be a single root cause: up/down/left/right directional nav all cycled through ONE flat list mixing a difficulty row and mode/play buttons, so ANY direction could land focus on a play button, and the confirm button then instantly started a game from wherever focus landed.","rule":"When adding directional (gamepad/keyboard) navigation over a UI with visually distinct groups/rows, never flatten all focusable elements into one linear index — model the grid's real rows/columns/groups explicitly, and let each direction move on only its own axis within the current group. A flat list is fine for a single homogeneous row; it silently breaks the moment two different-purpose control groups sit on the same screen.","verified":true},{"id":"E5","title":"stall detection needs best ever not turnover","date":"2026-07-24","tags":["gamedev","algorithm","ai","gamedesign"],"what":"A stall/deadlock detector for an AI agent reset its \"stuck\" counter on any turn-over-turn improvement, so a slow oscillation (advance one turn, retreat the next, repeat) never tripped it — the agent stayed genuinely stuck for 500+ simulated rounds while the counter kept reporting \"just made progress.\"","rule":"When building a stall/no-progress/deadlock detector, never gate the reset on \"better than last observation\" — gate it on \"better than the best observation ever seen.\" A previous-turn-relative check is blind to oscillation and slow drift; a best-ever check is not, and costs nothing extra (one running minimum, no history buffer).","verified":true},{"id":"E6","title":"interact in place tile marked passable","date":"2026-07-25","tags":["gamedev","algorithm","pathfinding","ai","gamedesign"],"what":"An AI's pathfinder routed through a tile it could never actually cross, causing the AI to waste every move point re-triggering the same tile forever — a 500+ simulated-round infinite stall, invisible until a whole-run simulator with a generous round budget was used to hunt it down.","rule":"Whenever a tile/cell's move-resolution logic has a special case for \"stepping toward this doesn't relocate you,\" audit EVERY OTHER place that asks \"is this cell passable\" (pathfinding, connectivity/reachability generation, AI planning) for the same exclusion — a walkability check and a move resolver silently disagreeing about occupancy produces routes that look valid to the planner and are invisible-until-executed dead ends, and a per-turn \"did anything change\" check can hide the failure indefinitely since the planner re-derives the same \"valid\" (but impossible) path every time.","verified":true},{"id":"E7","title":"squash merge reused branch conflicts","date":"2026-07-24","tags":["git","process","workflow","tooling"],"what":"Opening a second PR from the same long-lived feature branch, after the first PR from that branch was squash-merged, got rejected by the GitHub API with a real \"merge conflicts\" (405, `mergeable_state: \"dirty\"`) — even though a manual diff proved the new commit's content applied cleanly and introduced zero actual conflicting lines.","rule":"A long-lived branch that gets squash-merged more than once must be re-synced onto its base (reset + replay only the unmerged commits) before EVERY subsequent PR from it — not just once, not only when a conflict actually appears. Treat \"PR from a branch with prior squash-merged history\" as needing this step by default, the same way `git pull --rebase` is the default after any shared-branch fast-forward, rather than debugging a \"phantom\" conflict after the fact.","verified":true},{"id":"E8","title":"pages deploy succeeds but live url 404s","date":"2026-07-26","tags":["devops","github-actions","github-pages","deployment"],"what":"A GitHub Pages deploy via Actions can report `success` on BOTH the build and deploy jobs, yet the live served URL returns HTTP 404 for a period afterward — not once, but reproducibly on every single deploy across an entire session (10+ occurrences), and not always cleared by exactly one retry (one occurrence needed a second `workflow_dispatch` after the first retry still 404'd, three curl checks in a row).","rule":"For GitHub Pages via Actions, \"the Action succeeded\" and \"the URL serves the new content\" are two DIFFERENT claims that must be verified separately and in sequence — never report a Pages deploy as done from Actions-run status alone; always live-curl-verify, and treat a first (or even second) 404 immediately after a reported-success deploy as an expected propagation window to retry through, not a signal to start debugging the workflow or Pages settings.","verified":true},{"id":"E9","title":"gated hud still leaked via unaudited log channel","date":"2026-07-26","tags":["gamedesign","gamedev","ui","security"],"what":"A hidden-information game's core secret (which direction the \"seeker\" role is truly watching) was correctly role-gated on its PRIMARY display surface (the HUD stat + a 3D wedge) earlier in the project, but a SEPARATE surface reading from the same underlying event stream — a scrolling text log — had zero gating at all, unconditionally showing the real value to every viewer regardless of role. The leak sat live in a shipped beta for several releases before a playtester's unrelated complaint (\"the log is boring, I never read it\") prompted a closer look that surfaced it.","rule":"When a hidden-information game's secret leaks via one presentation surface and gets fixed there, explicitly enumerate every OTHER surface reading from the same underlying state/event source (log, replay, summary, debug view, notification) and audit each one against the same \"who's allowed to see this\" question — don't assume a fix on the first surface found implies the others were already safe. Write the regression test against the SECRET ITSELF (assert the string/value never appears for the wrong viewer), not just against the surface where the original bug was found.","verified":true},{"id":"E10","title":"role check must become instance aware at every handoff","date":"2026-07-26","tags":["gamedev","architecture","state","multi-agent"],"what":"Scaling a single-player mode from 1 controllable entity to N (single prisoner -> a 3-prisoner group) required auditing THREE separate turn-handoff points in the control flow, not one — a boolean \"does the human control this role\" check that was correct when the role only ever mapped to one entity became silently wrong (would have stalled the game waiting on input that never arrives) the moment that role could map to multiple entity instances, only some of which are human-controlled.","rule":"When a boolean \"is this human-controlled\" check was written for a SINGULAR entity per role and the role is being generalized to admit MULTIPLE entities (companions, additional agents, a squad), don't just fix the one input gate that's obviously wrong — grep every OTHER decision point in the turn/state machine that implicitly assumed \"if not human, it's always AI\" or \"there's only ever one entity to check,\" since a turn-based flow with N handoff points needs the SAME instance-aware audit applied at all N, not just the first one found. This generalizes a known multi-agent-scale-out failure mode (Brain: an \"undo my own action\" bug that indexed a per-agent stack instead of the shared stack's actual top, invisible at N=1 by mathematical necessity) — cardinality bugs are invisible until you actually run at N>1, so treat \"we're about to support more than one\" as a trigger to re-audit every place touching that entity, not just the newest code path.","verified":true},{"id":"E11","title":"viewer vantage must not be derived from turn order","date":"2026-07-26","tags":["rendering","camera","multi-entity"],"what":"Camera follow, field-of-view masking, the exposure-danger vignette,","rule":"When a shared \"whose turn/entity is this\" field starts","verified":true},{"id":"E12","title":"checking a fix precondition is not applying it","date":"2026-07-26","tags":["process","git","squash-merge"],"what":"The squash-merge branch-staleness fix (this project's canon E7 —","rule":"A verification step that reads a fact (a tip SHA, a","verified":true},{"id":"E13","title":"deploy verify needs repeated samples not one","date":"2026-07-26","tags":["deploy","verification","cdn"],"what":"A single curl check reporting HTTP 200 with the correct build string","rule":"When verifying a deploy behind a CDN or any multi-node","verified":true},{"id":"E14","title":"global input interceptor silently eats tests first action","date":"2026-07-26","tags":["testing","input","regression"],"what":"Adding a global \"any control skips this\" interceptor (an intro","rule":"Before shipping any new \"intercept ALL input for a window","verified":true},{"id":"E15","title":"ready and usable are two different gates","date":"2026-07-26","tags":["gamedesign","ui","ai"],"what":"Cooldown-gated abilities needed TWO separate predicates — \"off","rule":"For any cooldown/charge-gated ability, model \"recharged\"","verified":true},{"id":"E16","title":"validate content against the finished world not the plan","date":"2026-07-26","tags":["gamedesign","procgen","content"],"what":"Adding consumable items whose effects target specific world objects","rule":"When adding content (items, quests, hints, tutorials) that","verified":true},{"id":"E17","title":"tune ai detours against the sim not intuition","date":"2026-07-26","tags":["ai","gamedesign","balance"],"what":"Teaching the AI to detour for beneficial pickups made it measurably","rule":"In a turn-based game where each side acts on a clock, TEMPO","verified":true},{"id":"E18","title":"difficulty that tunes a shared rule inverts for one role","date":"2026-07-26","tags":["gamedesign","asymmetric","difficulty"],"what":"In an asymmetric two-role game, the difficulty setting turned out to","rule":"In an asymmetric game, audit every consumer of the","verified":true},{"id":"E19","title":"a sandbox refuted my tier design twice in one session","date":"2026-07-26","tags":["ai","balance","method"],"what":"The same intuition — \"a more careful agent is a better agent\" — was","rule":"Treat \"the better agent is the more careful agent\" as a","verified":true},{"id":"E20","title":"a constant rng silently disables probability parameters","date":"2026-07-26","tags":["testing","simulation","method"],"what":"Pinning a sandbox's random source to a CONSTANT to make it","rule":"NEVER make a simulation deterministic by pinning its random","verified":true},{"id":"E21","title":"frame rate correct smoothing does not make the handoff safe","date":"2026-07-26","tags":["gamedev","animation","state"],"what":"Fixing per-frame smoothing to be frame-rate-independent does NOT make","rule":"Wherever a smoothed/asymptotic follower hands an object to","verified":true},{"id":"E22","title":"empty is not uncomputed in a path cache","date":"2026-07-30","tags":["gamedev","performance","pathfinding","caching","ai"],"what":"Conflating \"no path cached yet\" with \"cached path is empty\" made five NPCs","rule":"If a cached computation can legitimately return empty, \"is it","verified":true},{"id":"E23","title":"headless 3d capture cost not a hang","date":"2026-07-30","tags":["testing","harness","gamedev","3d","determinism"],"what":"A Playwright screenshot taken while a full-screen overlay sat over a live","rule":"In headless 3D, distinguish SLOW from HUNG before debugging. A","verified":true},{"id":"E24","title":"movement basis sign error passes a displacement test","date":"2026-07-30","tags":["gamedev","3d","input","testing","camera"],"what":"A first-person movement basis with wrong signs made `W` walk BACKWARD, and","rule":"For anything camera-relative (movement, strafing, formation slots,","verified":true},{"id":"E25","title":"raf polling starved behind a heavy synchronous evaluate","date":"2026-07-30","tags":["testing","harness","gamedev","playwright","3d"],"what":"`page.waitForFunction(pred, null, {timeout})` timed out — repeatedly,","rule":"After any `page.evaluate()` that does substantial synchronous","verified":true},{"id":"E26","title":"per surface input guards union to zero protection","date":"2026-07-26","tags":["input","ui","gamedev","architecture","testing","process"],"what":"Three recorded instances of one bug class, across three projects: -","rule":"For any capability claimed by MULTIPLE surfaces (\"any input","verified":true},{"id":"E27","title":"a documented retry remedy became a harmful habit","date":"2026-07-26","tags":["devops","deployment","process"],"what":"A remedy I had previously verified and written into canon — \"a 404","rule":"A verified \"just retry it\" remedy needs an explicit CEILING","verified":true},{"id":"E28","title":"bluff field cleared before the reader ever runs","date":"","tags":[],"what":"","rule":"","verified":false},{"id":"E29","title":"a second open playwright page throttles the first","date":"2026-07-30","tags":["testing","playwright","headless","browser","debugging","gamedev"],"what":"A new headless test scenario (gamepad hold-to-confirm on the intro splash) hung and then timed out waiting for a menu button that never became visible — same exact interaction sequence that already worked in a standalone test file (`gamepad-menu-nav.mjs`) failed inside a different one (`skills.mjs`) that opened it as a THIRD page.","rule":"In a Playwright script that opens more than one `browser.newPage()` across sequential scenarios, close each page before opening the next UNLESS the test explicitly needs them concurrent — and treat any rAF/animation-timed assertion (holds, tweens, cooldown fills) as a first suspect the moment a multi-page headless test times out on something that works standalone, especially when the failure surfaces as a downstream \"element not visible\" rather than an obvious timing message.","verified":true},{"id":"E30","title":"enum growth outran a hardcoded modulo","date":"2026-07-30","tags":["gamedev","input","gamepad","enum","debugging","ui"],"what":"A gamepad player reported \"can't dispatch guards as watcher\" — a brand-new 5th Watcher skill was completely unreachable via LT/RT slot-cycling, no matter how many times LT was pressed.","rule":"Any place that cycles/indexes over \"how many things are in category X\" via a hardcoded number is a landmine for the day category X grows — grep for the literal count (not just the enum name) whenever adding an entry to an enum/list that something else iterates a FIXED number of times over, especially across file boundaries where no import ties them together.","verified":true},{"id":"E31","title":"face buttons cant cover 4 directions plus confirm","date":"2026-07-30","tags":["gamedev","input","gamepad","ux","game-design"],"what":"The Watcher's \"bluff a direction\" gesture (and, later, DISPATCH's quadrant pick, which reuses the same intent) had a genuine, permanent gap on gamepad: South was structurally unreachable, from the very first commit that added gamepad bluff support, not from any later regression.","rule":"Before mapping an N-choice game vocabulary onto face buttons, count what's ALREADY reserved (universal confirm/back/etc.) and check N against the REMAINING budget, not the button count on the box — 4 face buttons rarely means 4 are actually free. When the budget comes up short, look for a control that's structurally idle during that exact context (a d-pad unused on a turn where \"move\" doesn't apply) before reassigning an existing binding.","verified":true},{"id":"E32","title":"ai never exercised tiered mechanic","date":"2026-08-01","tags":["gamedesign","ai","testing","balance"],"what":"Tiering a game mechanic's numeric parameters by difficulty and re-running the balance sandbox produced a result byte-identical to a flat-medium control with no tiering at all — the tiering appeared to do nothing.","rule":"Before reporting ANY before/after measurement of a tuning change to an AI-driven system, run a flat/unchanged control through the same harness. An identical-to-control result is not evidence the lever is weak — it is a specific signal to go grep whether the AI decision code even calls the changed thing, before trusting the numbers at all.","verified":true}],"tensions":[{"id":"T23","kind":"open-question","title":"an AI-vs-AI sim is a valid balance oracle for reachability, not for human-facing difficulty","status":"resolved","statusText":"🟢 resolved (evidence). Implemented the open sub-question's own proposed","summary":"Surfaced in Opticon M1. A whole-run AI-vs-AI simulator (900 games) is the only automatable balance oracle — it caught a 0% escape reachability bug and confirms both outcomes occur — yet every difficulty tier scored near-identically, because the difficulty knob is *bluff frequency*: doubt that only bites a human read…"},{"id":"T24","kind":"tradeoff","title":"a cautious opponent-AI is realistic but can stalemate a human","status":"resolved","statusText":"🟢 resolved (evidence). Implemented the entry's own open sub-question: an","summary":"Surfaced in Opticon M1. The single-player Watcher faces a BFS prisoner-AI that refuses tiles lit inside the gaze; that caution is believable and survives longer, but it times out ~12% of simulated games by wandering, and a human-Watcher game has no round cap — so a careful AI can deadlock a match with no resolution."},{"id":"T25","kind":"open-question","title":"does \"difficulty\" mean prisoner-favorable-to-Watcher, or opponent-skill relative to whichever role the human picked?","status":"resolved","statusText":"✅ resolved — DISPATCH, once actually tiered AND actually fired by the AI, gives both roles a strongly monotonic difficulty spread","summary":"Surfaced while auditing Opticon post-beta for further improvements (M1 follow-up, autonomous pass). The difficulty knob (easy/medium/hard) is implemented consistently from ONE perspective: it tunes how easily the Watcher's gaze catches a prisoner (tiered capture-exposure, resolves T23) and how attentive the Watcher …"},{"id":"T27","kind":"tradeoff","title":"a keyword pre-commit gate that false-positives on ordinary English trains the reflex it exists to prevent","status":"leaning","statusText":"🟡 open, no change made unprompted. The obvious fixes each have a cost:","summary":"Surfaced 2026-08-01 during Opticon's guard-legibility commit. The Brain pre-commit gate refuses a commit whose staged diff \"touches\" an open tension, which it decides by naive keyword matching. On one prose-heavy commit message it fired five times — T3, T11, T17, T21, T26 — on the words *promise*, *without*, *surviv…"}],"ideas":[{"domain":"SYSTEM","slug":"unused-tuning-param-signals-unfinished-feature","title":"audit-the-difficulty-ladder-not-just-the-code","summary":"When a difficulty/config ladder defines a per-tier tuning value (e.g. `{easy: 1, medium: 2, hard: 3}` alongside other tuned fields that ARE read), and that one field is never referenced by any decision logic, the right read is \"an intended behavior was never wired up,\" not \"dead code to delete.\" …","source":"Pappydapimp69/Opticon game/src/watcherAI.js (DIFFICULTY.memory,"},{"domain":"SYSTEM","slug":"orthogonal-mechanic-as-difficulty-lever","title":"dont-overload-the-fairness-rule","summary":"When a core detection/resolution rule must stay symmetric to be fair (a surveillance-camera's field-of-view obeying identical geometry no matter which side is human), re-tuning that rule's own parameters to create a \"difficulty\" setting risks silently flipping who it favors — the rule governs whi…","source":""},{"domain":"WORLDBUILDING","slug":"panopticon","title":"observation-as-architecture","summary":"\"Opticon\" — a project built on a Benthamite framing where observation itself is the architecture: the structure exists to make watching possible. Three code iterations and a Panopticon.md design doc exist, but the actual purpose was never articulated and the concept stalled. Dormant kernel: surve…","source":""},{"domain":"WORLDBUILDING","slug":"dormant-lore-needs-a-dual-purpose-test","title":"integrate-or-archive-dont-leave-ambiguous","summary":"Unintegrated worldbuilding (partial assets/docs that exist but were never given a clear job) is a real risk, not neutral scope sitting in reserve: game-narrative-design practice frames it as actively \"choking off\" story potential rather than just waiting — this directly describes the domain's own…","source":""},{"domain":"GAME-DESIGN","slug":"seeker-denied-direct-sight","title":"signals-plus-onramp","summary":"For a Panopticon / hunter-vs-hunted game to feel fair AND tense, the powerful \"seeker\" side must be denied direct sight of the hidden side, and the hidden side needs an on-ramp. Concretely: (1) never render the hidden actor to the seeker role — hide it for that role, and on the seeker's turn in h…","source":"live build — Opticon 3D (Pappydapimp69/Opticon), milestone-1 beta,"},{"domain":"GAME-DESIGN","slug":"caution-costs-turns-that-are-themselves-exposed","title":"n-plus-one-break-even-rule","summary":"In any turn-based contest where both sides act on the same clock, an agent's \"be careful\" option buys a MULTIPLIER on a per-turn hazard but pays in extra turns that are themselves exposed at the full base rate — so its value scales with how long the protection LASTS while its cost is immediate an…","source":"Opticon, where three separate caution heuristics (item-detour radius,"}],"generated":"2026-08-01"};
+
+const CX = 450, CY = 450;
+const R_TENSION = 150;
+const R_MEMORY = 260;
+const R_IDEA = 360;
+
+const STATUS_COLOR = { open: "#ff6b7a", leaning: "#ffb020", resolved: "#59f7a6" };
+const TAG_PALETTE = {
+  gamedesign: "#5ad4e6", ai: "#b18cff", testing: "#ffd166", devops: "#8595b0",
+  gamedev: "#5ad4e6", determinism: "#ff9f5a", state: "#7ee787", cutscene: "#f778ba",
+  browser: "#5ad4e6", input: "#ffd166", rendering: "#b18cff", balance: "#59f7a6",
+};
+function tagColor(tags) {
+  for (const t of tags) if (TAG_PALETTE[t]) return TAG_PALETTE[t];
+  return "#dfe8f7";
+}
+
+const svg = document.getElementById("viz");
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function polar(r, deg) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+}
+
+// ---- Guide rings + slow gaze sweep (echoes the game's own 90deg wedge) ---
+for (const r of [R_TENSION, R_MEMORY, R_IDEA]) {
+  svg.appendChild(el("circle", { class: "ring-guide", cx: CX, cy: CY, r }));
+}
+{
+  const sweep = el("g", { class: "sweep" });
+  const [x1, y1] = polar(R_IDEA + 20, -45);
+  const [x2, y2] = polar(R_IDEA + 20, 45);
+  const path = el("path", {
+    d: `M ${CX} ${CY} L ${x1} ${y1} A ${R_IDEA + 20} ${R_IDEA + 20} 0 0 1 ${x2} ${y2} Z`,
+    fill: "url(#gazeGrad)",
+  });
+  const defs = el("defs", {});
+  const grad = el("radialGradient", { id: "gazeGrad" });
+  grad.appendChild(el("stop", { offset: "0%", "stop-color": "#5ad4e6", "stop-opacity": "0.10" }));
+  grad.appendChild(el("stop", { offset: "100%", "stop-color": "#5ad4e6", "stop-opacity": "0" }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+  sweep.appendChild(path);
+  svg.appendChild(sweep);
+}
+
+// ---- Tower at the center ---------------------------------------------------
+svg.appendChild(el("circle", { class: "tower-body", cx: CX, cy: CY, r: 56 }));
+svg.appendChild(el("circle", { class: "tower-iris", cx: CX, cy: CY, r: 34 }));
+svg.appendChild(el("circle", { class: "tower-pupil", cx: CX, cy: CY, r: 11 }));
+
+// ---- Tooltip ---------------------------------------------------------------
+const tip = document.getElementById("tip");
+let pinned = null;
+function showTip(evt, html) {
+  tip.innerHTML = html;
+  tip.classList.add("show");
+  moveTip(evt);
+}
+function moveTip(evt) {
+  const pad = 16;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + 330 > window.innerWidth) x = evt.clientX - 330 - pad;
+  if (y + 160 > window.innerHeight) y = evt.clientY - 160 - pad;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+function hideTip() {
+  if (pinned) return;
+  tip.classList.remove("show");
+}
+document.addEventListener("mousemove", (e) => { if (tip.classList.contains("show")) moveTip(e); });
+
+// ---- Tensions: arc segments on the inner ring ------------------------------
+{
+  const n = DATA.tensions.length || 1;
+  const gapDeg = 4;
+  const span = 360 / n - gapDeg;
+  DATA.tensions.forEach((t, i) => {
+    const start = i * (360 / n) + gapDeg / 2;
+    const end = start + span;
+    const [x1, y1] = polar(R_TENSION, start);
+    const [x2, y2] = polar(R_TENSION, end);
+    const large = span > 180 ? 1 : 0;
+    const path = el("path", {
+      class: "arc",
+      d: `M ${x1} ${y1} A ${R_TENSION} ${R_TENSION} 0 ${large} 1 ${x2} ${y2}`,
+      fill: "none",
+      stroke: STATUS_COLOR[t.status] || "#ff6b7a",
+      "stroke-width": 14,
+      "stroke-linecap": "round",
+      opacity: 0.85,
+      style: "color:" + (STATUS_COLOR[t.status] || "#ff6b7a"),
+    });
+    const tooltip = `<div class="tt">${t.id} · ${t.kind}</div><div>${t.title}</div>
+      <div class="tk" style="margin-top:6px">${t.statusText}</div>
+      <div style="margin-top:4px">${t.summary}</div>`;
+    path.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    path.addEventListener("mouseleave", hideTip);
+    path.addEventListener("click", () => togglePin(path, tooltip));
+    svg.appendChild(path);
+  });
+}
+
+// ---- Memory: dots on the middle ring, chronological by id ------------------
+{
+  const n = DATA.memory.length || 1;
+  DATA.memory.forEach((m, i) => {
+    const deg = (i / n) * 360;
+    const [x, y] = polar(R_MEMORY, deg);
+    const color = tagColor(m.tags);
+    const dot = el("circle", {
+      class: "node", cx: x, cy: y, r: 6, fill: color, stroke: "#05070d",
+      "stroke-width": 1.5, style: "color:" + color,
+    });
+    const tooltip = `<div class="tt">${m.id} · ${m.title}</div>
+      <div class="tk">${m.date}${m.verified ? " · verified" : " · assumed"} · ${m.tags.map((t) => "[" + t + "]").join("")}</div>
+      <div style="margin-top:4px">${m.what}</div>
+      ${m.rule ? '<div style="margin-top:6px;color:#8595b0"><i>' + m.rule + "</i></div>" : ""}`;
+    dot.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    dot.addEventListener("mouseleave", hideTip);
+    dot.addEventListener("click", () => togglePin(dot, tooltip));
+    svg.appendChild(dot);
+  });
+}
+
+// ---- Ideas: hollow dots on the outer ring, dormant kernels -----------------
+{
+  const n = DATA.ideas.length || 1;
+  DATA.ideas.forEach((k, i) => {
+    const deg = (i / n) * 360 + 360 / (n * 2);
+    const [x, y] = polar(R_IDEA, deg);
+    const dot = el("circle", {
+      class: "node", cx: x, cy: y, r: 7, fill: "rgba(255,176,32,0.12)",
+      stroke: "var(--idea)", "stroke-width": 1.5, "stroke-dasharray": "2 2",
+      style: "color: var(--idea)",
+    });
+    const tooltip = `<div class="tt">${k.title}</div>
+      <div class="tk">${k.domain} · ${k.slug}</div>
+      <div style="margin-top:4px">${k.summary}</div>`;
+    dot.addEventListener("mouseenter", (e) => showTip(e, tooltip));
+    dot.addEventListener("mouseleave", hideTip);
+    dot.addEventListener("click", () => togglePin(dot, tooltip));
+    svg.appendChild(dot);
+  });
+}
+
+function togglePin(node, html) {
+  if (pinned === node) {
+    node.classList.remove("pinned");
+    pinned = null;
+    tip.classList.remove("show");
+    return;
+  }
+  if (pinned) pinned.classList.remove("pinned");
+  pinned = node;
+  node.classList.add("pinned");
+  tip.innerHTML = html;
+  tip.classList.add("show");
+}
+
+// ---- Ring labels ------------------------------------------------------------
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_TENSION - 8, "text-anchor": "middle" }); t.textContent = "tensions"; return t; })());
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_MEMORY - 8, "text-anchor": "middle" }); t.textContent = "memory"; return t; })());
+svg.appendChild((() => { const t = el("text", { class: "ring-label", x: CX, y: CY - R_IDEA - 8, "text-anchor": "middle" }); t.textContent = "ideas"; return t; })());
+
+// ---- Legend + header ---------------------------------------------------------
+document.getElementById("gendate").textContent = DATA.generated;
+document.getElementById("subtitle").textContent =
+  `${DATA.memory.length} lessons · ${DATA.tensions.length} tensions · ${DATA.ideas.length} idea kernels`;
+const legend = document.getElementById("legend");
+const legendItems = [
+  ["open tension", STATUS_COLOR.open],
+  ["leaning", STATUS_COLOR.leaning],
+  ["resolved", STATUS_COLOR.resolved],
+  ["memory (by tag)", "#dfe8f7"],
+  ["idea kernel", "var(--idea)"],
+];
+for (const [label, color] of legendItems) {
+  const item = document.createElement("div");
+  item.className = "item";
+  item.innerHTML = `<span class="swatch" style="background:${color}"></span>${label}`;
+  legend.appendChild(item);
+}
+</script>
+</body>
+</html>
