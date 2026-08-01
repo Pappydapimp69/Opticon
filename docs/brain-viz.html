@@ -31,6 +31,20 @@
     color: var(--prisoner); text-shadow: 0 0 18px rgba(90, 212, 230, .35);
   }
   header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  /* The movie is a real, pre-rendered video file (see render-brain-movie.mjs)
+     — a plain <video> here costs nothing beyond hardware decode once played,
+     and nothing at all until then (preload="metadata" only). An earlier
+     version drove the same animation live in the DOM (1100+ SVG nodes,
+     per-frame viewBox mutation, simultaneous keyframe animations with
+     drop-shadow filters) and that was genuinely heavy — reported as "very
+     demanding on the processor." Baking it to video moves that cost to
+     build time, once, instead of to every viewer's browser, every time. */
+  .movie-wrap { display: flex; justify-content: center; padding: 10px 16px 6px; }
+  video {
+    max-width: 720px; width: 100%; border-radius: 10px; background: #000;
+    border: 1px solid var(--line);
+  }
+  .movie-caption { text-align: center; color: var(--muted); font-size: 12px; padding: 0 16px 10px; }
   .toolbar {
     display: flex; gap: 14px; justify-content: center; align-items: center;
     flex-wrap: wrap; padding: 14px 16px 4px;
@@ -49,45 +63,18 @@
   .legend .item:hover { border-color: var(--line); }
   .legend .item.off { opacity: .35; }
   .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-  /* Movie controls: default state (no autoplay, no motion) matches the
-     static page exactly — playback is opt-in per the retrieved Brain
-     lesson (viz/E1) that anything auto-running past a few seconds needs an
-     explicit control, and prefers-reduced-motion disables it outright
-     rather than offering a control for motion that shouldn't happen. */
-  .movie-bar {
-    display: flex; gap: 12px; justify-content: center; align-items: center;
-    padding: 4px 16px 10px; flex-wrap: wrap;
-  }
-  .movie-btn {
-    background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px;
-    color: var(--text); padding: 7px 14px; font-size: 12.5px; cursor: pointer;
-    font-family: inherit; transition: border-color .12s;
-  }
-  .movie-btn:hover { border-color: var(--prisoner); }
-  .movie-btn.icon { padding: 7px 10px; }
-  .movie-btn:disabled { opacity: .4; cursor: not-allowed; }
-  #scrub { width: 320px; max-width: 50vw; accent-color: var(--prisoner); }
-  .stage { display: flex; justify-content: center; padding: 4px 16px 10px; position: relative; }
+  .stage { display: flex; justify-content: center; padding: 4px 16px 10px; }
   svg { max-width: 980px; width: 100%; height: auto; overflow: visible; }
-  /* Caption: restrained by design (brain/NARRATION#voiceover-restraint) — it
-     supplies WHY a moment mattered, not a restated label for a dot the
-     viewer can already see move. Fixed to the stage, not the SVG, so it
-     doesn't shift as the camera zooms during playback. */
-  .caption {
-    position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%);
-    max-width: min(560px, 86%); text-align: center; padding: 10px 18px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    font-size: 13.5px; line-height: 1.5; opacity: 0; transition: opacity .4s ease;
-    backdrop-filter: blur(6px); pointer-events: none;
-  }
-  .caption.show { opacity: 1; }
-  .caption b { color: var(--prisoner); }
   .hide-memory .k-memory { display: none; }
   .hide-tension .k-tension { display: none; }
   .hide-idea .k-idea { display: none; }
   .hide-exploration .k-exploration { display: none; }
+  /* The one piece of continuous motion left on this page: a single
+     GPU-composited rotation of a gradient wedge, no repaint/layout per
+     frame. Kept because it's cheap; still respects reduced-motion. */
   .sweep { transform-origin: 500px 500px; animation: spin 30s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .sweep { animation: none; } }
   .tower-body { fill: var(--panel-solid); stroke: var(--prisoner); stroke-width: 2; }
   .tower-iris { fill: none; stroke: var(--prisoner); stroke-width: 2; opacity: .8; }
   .tower-pupil { fill: var(--watcher); }
@@ -95,25 +82,9 @@
   .tick { stroke: var(--line); stroke-width: 1; }
   .tick-label { fill: var(--muted); font-size: 10px; }
   .hit { fill: transparent; cursor: pointer; }
-  .mark { pointer-events: none; transition: opacity .15s ease; transform-box: fill-box; transform-origin: center; }
+  .mark { pointer-events: none; transition: opacity .15s ease; }
   .node-group.dim .mark { opacity: .1; }
   .node-group:hover .mark, .node-group.pinned .mark { filter: drop-shadow(0 0 5px currentColor); }
-  /* Reveal state for playback: an entry not yet "arrived" in the story is
-     fully suppressed (opacity AND pointer-events), not just dimmed — dim
-     is the filter's language (still there, just de-emphasized) and this is
-     a different claim (not yet part of the timeline shown so far). A tiny
-     built-in overshoot (110% before settling) reads as "arriving" rather
-     than "fading in"; brain/anim#E3's frame-rate-independence warning is
-     for continuously RE-TARGETED motion (the camera, below) — a one-shot
-     reveal fired once per entry doesn't have that failure mode. */
-  .node-group.pending .mark, .node-group.pending .hit { opacity: 0; pointer-events: none; }
-  .node-group.pop .mark { animation: popIn 360ms cubic-bezier(.22, 1.4, .36, 1) both; }
-  @keyframes popIn { 0% { opacity: 0; transform: scale(0.2); } 70% { opacity: 1; transform: scale(1.12); } 100% { opacity: 1; transform: scale(1); } }
-  #viz.playing { transition: none; }
-  @media (prefers-reduced-motion: reduce) {
-    .sweep { animation: none; }
-    .node-group.pop .mark { animation: none; opacity: 1; transform: none; }
-  }
   #tip {
     position: fixed; max-width: 340px; pointer-events: none; z-index: 10;
     background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -133,21 +104,25 @@
     <h1>OPTICON</h1>
     <p id="subtitle">the archive watches itself</p>
   </header>
+  <div class="movie-wrap">
+    <video controls preload="metadata" playsinline poster="brain-viz-poster.png">
+      <source src="brain-viz-movie.webm" type="video/webm" />
+      <source src="brain-viz-movie.mp4" type="video/mp4" />
+      <track kind="captions" src="brain-viz-movie.vtt" srclang="en" label="Beats" default />
+      Your browser doesn't support video playback — use the explorer below instead.
+    </video>
+  </div>
+  <p class="movie-caption">
+    the whole archive, day one to today, narrated by its own tensions — pre-rendered, not simulated live
+    (regenerate with <code>node tools/render-brain-movie.mjs</code>)
+  </p>
   <div class="toolbar">
     <input id="filter" type="text" placeholder="filter by project…" autocomplete="off" />
     <div class="legend" id="legend"></div>
   </div>
-  <div class="movie-bar">
-    <button id="playBtn" class="movie-btn" title="Play the story">▶ Play the story</button>
-    <input id="scrub" type="range" min="0" max="1000" value="1000" />
-    <button id="soundBtn" class="movie-btn icon" title="Toggle sound">🔇</button>
-  </div>
-  <div class="stage">
-    <svg id="viz" viewBox="0 0 1000 1000" role="img" aria-label="Time spiral of every Brain memory, tension, idea, and exploration entry from day one to today"></svg>
-    <div id="caption" class="caption"></div>
-  </div>
+  <div class="stage"><svg id="viz" viewBox="0 0 1000 1000" role="img" aria-label="Time spiral of every Brain memory, tension, idea, and exploration entry from day one to today"></svg></div>
   <footer>
-    generated <span id="gendate"></span> · regenerate with <code>node tools/brain-viz.mjs</code>
+    generated <span id="gendate"></span> · regenerate this explorer with <code>node tools/brain-viz.mjs</code>
     · one spiral turn ≈ one span of time, day one at the tower, today at the rim · click a legend swatch to hide a type
   </footer>
   <div id="tip"></div>
@@ -309,11 +284,9 @@ function tooltipFor(e) {
 }
 
 // ---- Plot every entry ---------------------------------------------------------
-const nodeIndex = []; // {group, mark, project, t, dayIndex}
+const nodeIndex = []; // {group, project}
 for (const e of DATA.entries) {
   const [x, y] = placement(e);
-  const t = daysBetween(DATA.minDate, e.date) / totalDays;
-  const dayIndex = daysBetween(DATA.minDate, e.date);
   const group = el("g", { class: `node-group k-${e.kind}` });
 
   let mark;
@@ -327,12 +300,6 @@ for (const e of DATA.entries) {
     mark = el("circle", { class: "mark", cx: x, cy: y, r: 4, fill: "rgba(255,176,32,0.15)", stroke: "var(--idea)", "stroke-width": 1.3, "stroke-dasharray": "2 2" });
     group.style.color = "var(--idea)";
   } else {
-    // A CSS `transform: scale(...)` animation on this element (the reveal
-    // pop, added below) REPLACES rather than composes with an SVG
-    // `transform` attribute on the same element — the rotated diamond
-    // would silently un-rotate the instant it played. Keep the rotation on
-    // an inner, un-animated <g> and give the outer <g class="mark"> (the
-    // thing CSS actually touches) no attribute-based transform of its own.
     const s = 5.4;
     const spin = el("g", { transform: `rotate(45 ${x} ${y})` });
     spin.appendChild(el("rect", { x: x - s / 2, y: y - s / 2, width: s, height: s, fill: stateColor(e.state), opacity: e.state === "spent" ? 0.5 : 0.9 }));
@@ -348,11 +315,7 @@ for (const e of DATA.entries) {
   group.appendChild(mark);
   group.appendChild(hit);
   svg.appendChild(group);
-  const dayList = byDate.get(e.date);
-  nodeIndex.push({
-    entry: e, group, mark, project: (e.project || "").toLowerCase(), t, dayIndex, x, y,
-    withinDayIndex: dayList.indexOf(e), withinDayCount: dayList.length,
-  });
+  nodeIndex.push({ group, project: (e.project || "").toLowerCase() });
 }
 
 function togglePin(group, html) {
@@ -406,323 +369,6 @@ for (const [label, color, kind] of legendItems) {
     svg.parentElement.className = [...hidden].map((k) => "hide-" + k).join(" ");
   });
   legend.appendChild(item);
-}
-
-// ==== MOVIE MODE =============================================================
-// Grounded in a brain query on visuals/sound before building (see the shipping
-// commit for the retrieved lesson IDs). What each piece below is applying:
-//  - semantic-anchor time warp (viz-growth#E7,E9): pacing holds on real beats
-//    instead of drifting proportionally through empty stretches.
-//  - sqrt-scaled, capped stagger for same-day reveal bursts (garden-viz#E8,E9)
-//    instead of a flat per-item delay that would make a 40-idea day take 40x
-//    as long as a 1-idea day, or flash by unreadably if capped too hard.
-//  - an integer day cursor for deterministic reveal counts (garden-viz#E9)
-//    instead of accumulated float time, which reveals different counts at
-//    different frame rates for the exact same elapsed wall time.
-//  - a camera that clamps to the actual currently-revealed extent
-//    (MOTION/camera idea) instead of a blind progress schedule that doesn't
-//    know what's really on screen yet.
-//  - frame-rate-independent exponential smoothing (anim#E3) for the one
-//    continuously RE-TARGETED motion here, the camera zoom — the one-shot
-//    reveal pop is a different case (fires once, never re-targeted) and uses
-//    an ordinary CSS animation instead.
-//  - tolerance-based playback completion, snapped to the true end (viz#E8)
-//    rather than a straggling frame leaving it at 99.9% forever.
-//  - a drone/riser/stinger three-layer sound model (NARRATION/sound-design),
-//    entirely gated behind an explicit user gesture (never on page load or
-//    even on Play — only the separate sound toggle creates the AudioContext)
-//    per the autoplay-gate lessons (dog#E1, shadow#E1/E2/E4).
-//  - auto-run needing a control, and reduced-motion disabling it outright
-//    (viz-growth#E1) — the default page state is untouched (nothing plays
-//    unless the user asks), and Play is disabled under prefers-reduced-motion.
-
-const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-// ---- Beats: every tension's own filing date, plus the two bookends. Real
-// data only, no invented narration — voiceover-restraint (NARRATION idea)
-// means the caption should say why a moment mattered, and a tension's own
-// title/status already carries that; nothing here is fabricated.
-const beats = DATA.entries
-  .filter((e) => e.kind === "tension")
-  .map((e) => ({
-    t: daysBetween(DATA.minDate, e.date) / totalDays,
-    caption: `<b>${e.id} ${e.status}</b> — ${e.title}`,
-    cue: e.status,
-    _firedRiser: false,
-    _firedStinger: false,
-  }));
-beats.push({ t: 0, caption: `<b>Day one</b> — ${DATA.minDate}. The archive begins.`, cue: "open", _firedRiser: true, _firedStinger: false });
-beats.push({ t: 1, caption: `<b>Today</b> — ${DATA.entries.length} entries across ${DATA.projects.length} projects.`, cue: "resolved", _firedRiser: false, _firedStinger: false });
-beats.sort((a, b) => a.t - b.t);
-
-// ---- Semantic-anchor warp: map linear playback progress (0..1 over
-// MOVIE_DURATION_MS) to raw story position (0..1 over the real date range),
-// slowing near each beat (a dwell window, cosine-eased) so autoplay visibly
-// HOLDS on a beat instead of crossing it at the same rate as an empty week.
-const DWELL_HALF_WIDTH = Math.min(0.05, Math.max(0.006, 1.2 / totalDays));
-const MIN_SPEED = 0.15;
-function localSpeed(rawT) {
-  let speed = 1;
-  for (const b of beats) {
-    const d = Math.abs(rawT - b.t) / DWELL_HALF_WIDTH;
-    if (d < 1) speed = Math.min(speed, MIN_SPEED + (1 - MIN_SPEED) * (0.5 - 0.5 * Math.cos(d * Math.PI)));
-  }
-  return speed;
-}
-const WARP_SAMPLES = 2000;
-const warpTable = []; // [{rawT, movieT}] — both monotonic 0..1
-{
-  let cum = 0;
-  for (let i = 0; i <= WARP_SAMPLES; i++) {
-    const rawT = i / WARP_SAMPLES;
-    if (i > 0) cum += (1 / Math.max(MIN_SPEED, localSpeed(rawT))) / WARP_SAMPLES;
-    warpTable.push({ rawT, movieT: cum });
-  }
-  const total = warpTable[warpTable.length - 1].movieT || 1;
-  for (const row of warpTable) row.movieT /= total;
-}
-function movieProgressToRawT(p) {
-  p = Math.max(0, Math.min(1, p));
-  let lo = 0, hi = warpTable.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (warpTable[mid].movieT < p) lo = mid + 1; else hi = mid;
-  }
-  return warpTable[lo].rawT;
-}
-function rawTToMovieProgress(rawT) {
-  let lo = 0, hi = warpTable.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (warpTable[mid].rawT < rawT) lo = mid + 1; else hi = mid;
-  }
-  return warpTable[lo].movieT;
-}
-
-// ---- Reveal state. The default page load touches none of this — every
-// entry starts fully visible exactly as before movie mode existed; only
-// engaging Play or the scrub bar switches into "story" reveal tracking.
-let revealedCursor = null; // sentinel: guarantees the first call always runs
-let revealedMaxRadius = R_MAX;
-function setDayCursor(dayIndex, animate) {
-  if (dayIndex === revealedCursor) return;
-  revealedCursor = dayIndex;
-  let maxR = R_MIN;
-  for (const n of nodeIndex) {
-    const shouldShow = n.dayIndex <= dayIndex;
-    const isPending = n.group.classList.contains("pending");
-    if (shouldShow) {
-      const r = Math.hypot(n.x - CX, n.y - CY);
-      if (r > maxR) maxR = r;
-      if (isPending) {
-        n.group.classList.remove("pending");
-        if (animate) {
-          n.group.classList.remove("pop");
-          void n.group.offsetWidth; // force reflow so a re-added class restarts the CSS animation
-          const win = Math.min(650, 90 * Math.sqrt(n.withinDayCount));
-          n.mark.style.animationDelay = (n.withinDayCount > 1 ? (n.withinDayIndex / n.withinDayCount) * win : 0) + "ms";
-          n.group.classList.add("pop");
-        }
-      }
-    } else if (!isPending) {
-      n.group.classList.add("pending");
-      n.group.classList.remove("pop");
-    }
-  }
-  revealedMaxRadius = maxR;
-}
-
-// ---- Camera: clamps to what's actually revealed right now (MOTION/camera),
-// not a blind schedule, smoothed with a frame-rate-independent exponential
-// approach (anim#E3) since it's re-targeted every frame during playback.
-let cameraRadius = null;
-function applyCamera(dt) {
-  const targetR = Math.min(500, revealedMaxRadius + 50);
-  if (cameraRadius === null) cameraRadius = targetR;
-  else cameraRadius += (targetR - cameraRadius) * (1 - Math.exp(-4 * Math.max(0, dt)));
-  const size = cameraRadius * 2;
-  svg.setAttribute("viewBox", (CX - cameraRadius) + " " + (CY - cameraRadius) + " " + size + " " + size);
-}
-
-// ---- Caption ----------------------------------------------------------------
-const captionEl = document.getElementById("caption");
-let storyModeActive = false;
-let lastBeatShown = null;
-function updateCaptionDisplay(rawT) {
-  if (!storyModeActive) return;
-  let active = null;
-  for (const b of beats) if (b.t <= rawT + 1e-6) active = b;
-  if (!active) { captionEl.classList.remove("show"); return; }
-  if (active !== lastBeatShown) { captionEl.innerHTML = active.caption; lastBeatShown = active; }
-  captionEl.classList.add("show");
-}
-
-// ---- Sound: drone (mood) + riser (anticipation) + stinger (payoff), the
-// three-layer model from NARRATION/sound-design. AudioContext is created
-// ONLY here, on the sound toggle specifically — Play alone never touches
-// audio — and resume() is fire-and-forget, never awaited on a critical
-// path (dog#E1: some browsers leave resume() pending forever).
-const soundBtn = document.getElementById("soundBtn");
-let audioCtx = null, droneGain = null, soundOn = false;
-function ensureAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  droneGain = audioCtx.createGain();
-  droneGain.gain.value = 0;
-  droneGain.connect(audioCtx.destination);
-  const drone = audioCtx.createOscillator();
-  drone.type = "sine";
-  drone.frequency.value = 55;
-  const lfo = audioCtx.createOscillator();
-  lfo.frequency.value = 0.07;
-  const lfoGain = audioCtx.createGain();
-  lfoGain.gain.value = 6;
-  lfo.connect(lfoGain).connect(drone.frequency);
-  drone.connect(droneGain);
-  drone.start();
-  lfo.start();
-}
-function setSoundOn(on) {
-  soundOn = on;
-  soundBtn.textContent = on ? "🔊" : "🔇";
-  if (on) {
-    ensureAudio();
-    audioCtx.resume().catch(() => {});
-    droneGain.gain.linearRampToValueAtTime(0.035, audioCtx.currentTime + 1.2);
-  } else if (audioCtx) {
-    droneGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.6);
-  }
-}
-soundBtn.addEventListener("click", () => setSoundOn(!soundOn));
-
-function stinger(status) {
-  if (!soundOn || !audioCtx) return;
-  const t0 = audioCtx.currentTime;
-  const freqs = status === "resolved" ? [660, 990] : status === "leaning" ? [440] : [330, 311];
-  freqs.forEach((f, i) => {
-    const osc = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    osc.type = "triangle";
-    osc.frequency.value = f;
-    g.gain.setValueAtTime(0.0001, t0 + i * 0.06);
-    g.gain.linearRampToValueAtTime(0.09, t0 + i * 0.06 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.06 + 0.5);
-    osc.connect(g).connect(audioCtx.destination);
-    osc.start(t0 + i * 0.06);
-    osc.stop(t0 + i * 0.06 + 0.55);
-  });
-}
-function riser() {
-  if (!soundOn || !audioCtx) return;
-  const t0 = audioCtx.currentTime;
-  const osc = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(120, t0);
-  osc.frequency.exponentialRampToValueAtTime(360, t0 + 0.5);
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.45);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
-  osc.connect(g).connect(audioCtx.destination);
-  osc.start(t0);
-  osc.stop(t0 + 0.6);
-}
-function updateAudioCues(rawT) {
-  if (!soundOn) return;
-  const lookahead = DWELL_HALF_WIDTH * 0.6;
-  for (const b of beats) {
-    if (!b._firedRiser && rawT >= b.t - lookahead && rawT < b.t) { riser(); b._firedRiser = true; }
-    if (!b._firedStinger && rawT >= b.t) { stinger(b.cue); b._firedStinger = true; }
-  }
-}
-
-// ---- Playback engine: requestAnimationFrame, never setTimeout (auto-pauses
-// when backgrounded, syncs to actual repaint — MOTION/animation-loop idea). ---
-const MOVIE_DURATION_MS = 42000;
-const playBtn = document.getElementById("playBtn");
-const scrub = document.getElementById("scrub");
-let currentRawT = 1;
-let playing = false;
-let pausedProgress = 0;
-let startTimestamp = null;
-let lastFrameTime = null;
-
-function applyRawT(rawT, dt) {
-  currentRawT = rawT;
-  scrub.value = String(Math.round(rawT * 1000));
-  setDayCursor(Math.floor(rawT * totalDays), true);
-  applyCamera(dt);
-  updateCaptionDisplay(rawT);
-  updateAudioCues(rawT);
-}
-
-function frame(ts) {
-  if (!playing) return;
-  if (startTimestamp === null) startTimestamp = ts - pausedProgress * MOVIE_DURATION_MS;
-  const dt = lastFrameTime === null ? 0.016 : Math.min(0.25, (ts - lastFrameTime) / 1000);
-  lastFrameTime = ts;
-  const progress = (ts - startTimestamp) / MOVIE_DURATION_MS;
-  if (progress >= 1) {
-    // Tolerance-based completion (viz#E8): snap to the true end instead of
-    // trusting the next frame to land exactly on 1, which float accumulation
-    // doesn't reliably do.
-    applyRawT(1, dt);
-    playing = false;
-    playBtn.textContent = "▶ Play the story";
-    pausedProgress = 0;
-    return;
-  }
-  applyRawT(movieProgressToRawT(progress), dt);
-  requestAnimationFrame(frame);
-}
-
-function startPlayback() {
-  playing = true;
-  startTimestamp = null;
-  lastFrameTime = null;
-  playBtn.textContent = "⏸ Pause";
-  requestAnimationFrame(frame);
-}
-function pausePlayback() {
-  playing = false;
-  pausedProgress = rawTToMovieProgress(currentRawT);
-  playBtn.textContent = "▶ Resume";
-}
-function resetAndPlay() {
-  beats.forEach((b) => { b._firedRiser = b.t === 0; b._firedStinger = false; });
-  nodeIndex.forEach((n) => { n.group.classList.add("pending"); n.group.classList.remove("pop"); });
-  revealedCursor = null;
-  revealedMaxRadius = R_MIN;
-  cameraRadius = null;
-  pausedProgress = 0;
-  storyModeActive = true;
-  lastBeatShown = null;
-  captionEl.classList.remove("show");
-  startPlayback();
-}
-playBtn.addEventListener("click", () => {
-  if (reducedMotion) return;
-  if (playing) { pausePlayback(); return; }
-  if (currentRawT >= 0.999) { resetAndPlay(); return; }
-  startPlayback();
-});
-scrub.addEventListener("input", () => {
-  if (playing) pausePlayback();
-  storyModeActive = true;
-  const rawT = Number(scrub.value) / 1000;
-  currentRawT = rawT;
-  pausedProgress = rawTToMovieProgress(rawT);
-  setDayCursor(Math.floor(rawT * totalDays), false); // direct manipulation: instant, no stagger
-  applyCamera(cameraRadius === null ? 0 : 0.15);
-  updateCaptionDisplay(rawT);
-  // Dragging to the very end should offer a fresh replay, not a stale
-  // "Resume" left over from whatever the button said before the drag.
-  playBtn.textContent = rawT >= 0.999 ? "▶ Play the story" : "▶ Resume";
-});
-
-if (reducedMotion) {
-  playBtn.disabled = true;
-  playBtn.textContent = "Motion reduced — use the scrub bar";
 }
 </script>
 </body>
