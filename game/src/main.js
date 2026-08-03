@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.43.0";
+const BUILD = "beta-0.44.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -76,6 +76,13 @@ const app = {
   // in one slot prevents Dispatch and Double Bluff from competing for the
   // same next direction press.
   armedSkill: null,
+  // checkOver() has four call sites (turn handoffs, the AI loops, and the
+  // walk-animation drain), and the first thing it does — app.running = false
+  // — does not stop the later ones from re-entering while isOver() is still
+  // true. Anything with a real side effect there needs its own latch, not
+  // the running flag: recording a W/L on every re-entry would inflate the
+  // record by however many paths happened to fire that frame.
+  resultRecorded: false,
 };
 
 // Persisted across sessions: difficulty pick + audio volume. Small and
@@ -100,6 +107,99 @@ function saveSettings() {
     );
   } catch {
     /* ignore */
+  }
+}
+
+// Per-role, per-difficulty win/loss record. Both single-player roles are real
+// modes with their own difficulty curve (Watcher capture 82/74/65%, Prisoner
+// 48/74/92% — the two are tuned in opposite directions on purpose), so one
+// combined "games won" number would average those into nonsense. Hotseat is
+// deliberately not tracked: both sides are human, so a personal record has
+// nobody to belong to.
+const RECORD_KEY = "opticon.record.v1";
+const RECORD_ROLES = ["Prisoner", "Watcher"];
+const RECORD_DIFFS = ["easy", "medium", "hard"];
+
+function blankRecord() {
+  const r = {};
+  for (const role of RECORD_ROLES) {
+    r[role] = {};
+    for (const d of RECORD_DIFFS) r[role][d] = { won: 0, lost: 0 };
+  }
+  return r;
+}
+
+// Merged against a blank rather than trusted as-is: this is user-writable
+// storage that also has to survive its own future shape changes (a new
+// difficulty, a renamed role), and a missing bucket would otherwise throw on
+// first read rather than degrade to zeroes.
+function loadRecord() {
+  const rec = blankRecord();
+  try {
+    const raw = localStorage.getItem(RECORD_KEY);
+    if (!raw) return rec;
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== "object") return rec;
+    for (const role of RECORD_ROLES) {
+      for (const d of RECORD_DIFFS) {
+        const cell = saved?.[role]?.[d];
+        if (!cell) continue;
+        rec[role][d] = {
+          won: Number.isFinite(cell.won) ? Math.max(0, Math.floor(cell.won)) : 0,
+          lost: Number.isFinite(cell.lost) ? Math.max(0, Math.floor(cell.lost)) : 0,
+        };
+      }
+    }
+  } catch {
+    /* corrupt or unavailable — a fresh record is the right fallback */
+  }
+  return rec;
+}
+
+function saveRecord(rec) {
+  try {
+    localStorage.setItem(RECORD_KEY, JSON.stringify(rec));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Did the human's OWN side win? The Prisoner side wins if any prisoner
+// reaches the gate; the Watcher side wins on capture or on the round limit.
+// g.winner already encodes that, so this is just "is that my role".
+function humanWonGame(g) {
+  return g.winner === app.config.humanRole;
+}
+
+function recordGameResult(g) {
+  if (app.config.mode === "hotseat") return null;
+  const role = app.config.humanRole;
+  const diff = app.config.difficulty;
+  if (!RECORD_ROLES.includes(role) || !RECORD_DIFFS.includes(diff)) return null;
+  const rec = loadRecord();
+  const cell = rec[role][diff];
+  if (humanWonGame(g)) cell.won++;
+  else cell.lost++;
+  saveRecord(rec);
+  return { role, diff, cell };
+}
+
+function recordLine(role, diff) {
+  const cell = loadRecord()[role]?.[diff];
+  if (!cell) return "";
+  const total = cell.won + cell.lost;
+  if (!total) return "no runs yet";
+  return `${cell.won}W · ${cell.lost}L`;
+}
+
+// Shown under each role on the menu, for the difficulty currently selected —
+// the record is per-difficulty, so displaying it without naming the tier it
+// belongs to would read as a lifetime total and quietly misreport.
+function updateRecordUI() {
+  const diff = app.config.difficulty;
+  for (const role of RECORD_ROLES) {
+    const el = document.getElementById(`record${role}`);
+    if (el) el.textContent = recordLine(role, diff);
   }
 }
 
@@ -314,6 +414,7 @@ function openMenu() {
   if (menu.col < 0) menu.col = 1;
   menuFocusApply();
   applyVolumeUI(); // pick up a mid-game HUD mute toggle if one happened
+  updateRecordUI(); // a game just finished — show its result on the way back
   document.querySelectorAll(".play-btn").forEach((x) => x.classList.remove("sel"));
   updateStartLabel(); // reflect current app.config even if reopened mid-game
 }
@@ -399,6 +500,7 @@ function wireMenu() {
       app.config.difficulty = b.getAttribute("data-diff");
       app.audio.play("ui");
       saveSettings();
+      updateRecordUI(); // the record is per-difficulty — follow the new tier
     });
   });
 
@@ -452,6 +554,7 @@ function wireMenu() {
   if (buildEl) buildEl.textContent = BUILD;
 
   applyVolumeUI(); // reflect whatever setting boot() loaded (saved or default)
+  updateRecordUI();
   updateStartLabel();
 }
 
@@ -491,6 +594,7 @@ function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
   app.stagedPath = [];
   app.armedSkill = null;
+  app.resultRecorded = false;
   breakArmed = false;
   updateBreakToggleUI();
   // Fresh seed each game for variety, but reproducible within a game.
@@ -1196,6 +1300,12 @@ function doEndPrisonerTurn() {
     app.audio.play("noise");
     app.renderer.triggerPing(startPos.x, startPos.y);
   }
+  // Same reasoning as the Watcher's end-turn: endPrisonerTurn runs the rules'
+  // end-condition check, and nothing downstream of here would notice if it
+  // just ended the game — the handoff below would hand off into a finished
+  // game instead of showing the result.
+  checkOver();
+  if (isOver(g)) return;
   app.audio.play("turn");
   // Now the Watcher acts.
   if (app.config.mode === "hotseat") {
@@ -1262,6 +1372,15 @@ function handleWatcherIntent(intent, arg) {
     checkOver();
     if (isOver(g)) return;
     endWatcherTurn(g);
+    // endWatcherTurn is itself an ending move: it advances the round (so it
+    // is what trips the ROUND_LIMIT time-up) and, with no living prisoner
+    // left to activate, declares the capture. The checkOver() above ran
+    // BEFORE all of that, so without this second check a human Watcher who
+    // ends the turn that hits the round limit gets no result screen at all —
+    // the game just sits there finished and silent. Re-entry is safe: both
+    // the overlay and the W/L record are latched behind app.resultRecorded.
+    checkOver();
+    if (isOver(g)) return;
     app.audio.play("turn");
     if (app.config.mode === "hotseat") {
       showPassDevice(); // block the view until the Prisoner's player confirms
@@ -1466,10 +1585,20 @@ function checkOver() {
   const g = app.game;
   if (g && isOver(g)) {
     app.running = false;
+    // Latch BEFORE the setTimeout: the other checkOver() call sites can fire
+    // again within the same 700ms, and each would otherwise queue its own
+    // recording (and its own overlay) for the one finished game.
+    const alreadyRecorded = app.resultRecorded;
+    app.resultRecorded = true;
+    if (alreadyRecorded) return;
+    const result = recordGameResult(g);
     if (g.winner === "Prisoner") app.audio.play("escape");
     else app.audio.play("caught");
     setTimeout(() => {
-      app.ui.gameOver(g, { difficulty: app.config.difficulty });
+      app.ui.gameOver(g, {
+        difficulty: app.config.difficulty,
+        record: result ? `${app.config.humanRole} on ${result.diff}: ${recordLine(result.role, result.diff)}` : "",
+      });
       // The overlay's buttons weren't reachable by gamepad/keyboard at all —
       // input.mode stayed "game" (no screen change ever set it), so a
       // gamepad press just fired stale game intents into a game that had
