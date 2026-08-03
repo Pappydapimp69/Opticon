@@ -126,14 +126,35 @@ html, body {
 /* ---- HUD ---- */
 #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 #hud button, #hud .tbtn { pointer-events: auto; }
+/* Single-line rail. It must NOT wrap: wrapping turned the phone layout into
+   three stacked rows with an orphaned Restart button and ate a sixth of the
+   screen. Groups shrink and the least important one drops out instead. */
 .topbar {
   position: absolute; top: 0; left: 0; right: 0;
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  padding: 8px 14px; background: linear-gradient(180deg, rgba(8,11,20,0.9), rgba(8,11,20,0));
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  padding: 7px 12px; min-width: 0;
+  background: linear-gradient(180deg, rgba(8,11,20,0.94) 40%, rgba(8,11,20,0));
 }
-.stat { display: flex; flex-direction: column; line-height: 1.1; }
-.stat .k { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); }
-.stat .val { font-size: 15px; font-weight: 700; }
+.stat-group {
+  display: flex; align-items: center; gap: 14px; min-width: 0;
+  padding-right: 10px; border-right: 1px solid rgba(120,150,200,0.16);
+}
+.stat-group:last-of-type { border-right: 0; padding-right: 0; }
+.stat {
+  display: flex; flex-direction: column; line-height: 1.15;
+  min-width: 0; overflow: hidden;  /* never paint over the next stat */
+}
+.stat .k {
+  font-size: 8px; text-transform: uppercase; letter-spacing: 1.4px;
+  color: var(--muted); opacity: 0.8;
+}
+.stat .val { font-size: 15px; font-weight: 700; white-space: nowrap; }
+/* The turn/round pair is the thing you read every few seconds — give it the
+   size, and let everything else sit a step down the hierarchy. */
+.stat-group.primary .val { font-size: 18px; }
+.stat-group.secondary .val { font-size: 13px; font-weight: 600; color: #b9c6de; }
+.topbar-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.mini-icon { display: none; }
 .val.prisoner { color: var(--prisoner); }
 .val.watcher { color: var(--watcher); }
 .spacer { flex: 1; }
@@ -144,7 +165,7 @@ html, body {
 .mini:hover { background: rgba(255,255,255,0.12); }
 
 .log {
-  position: absolute; left: 14px; bottom: 130px; width: min(320px, 60vw);
+  position: absolute; left: 14px; bottom: 150px; width: min(320px, 60vw);
   font-size: 12px; color: var(--muted); line-height: 1.5;
   text-shadow: 0 1px 3px #000;
 }
@@ -152,10 +173,10 @@ html, body {
 .logline .lr { color: rgba(120,150,200,0.5); margin-right: 4px; }
 
 .hint {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 122px;
-  max-width: 70vw; text-align: center; font-size: 12px; color: var(--muted);
-  text-shadow: 0 1px 3px #000;
+  max-width: 52ch; text-align: center; font-size: 12px; line-height: 1.45;
+  color: var(--muted); text-shadow: 0 1px 3px #000; margin: 0 auto;
 }
+.hint:empty { display: none; }
 
 .banner {
   position: absolute; top: 64px; left: 50%; transform: translateX(-50%) translateY(-8px);
@@ -169,33 +190,64 @@ html, body {
 .banner.watcher { color: var(--watcher); }
 .banner.prisoner { color: var(--prisoner); }
 
-/* ---- Touch controls ---- */
-.touch { position: absolute; bottom: 0; left: 0; right: 0; height: 116px; }
-.pad { position: absolute; bottom: 14px; display: none; }
-.pad.active { display: block; }
-.dpad { left: 18px; width: 224px; height: 96px; }
-.dpad .tbtn { position: absolute; width: 50px; height: 44px; }
-.dpad .up { left: 55px; top: 0; }
-.dpad .left { left: 0; top: 50px; }
-.dpad .right { left: 110px; top: 50px; }
-.dpad .down { left: 55px; top: 50px; }
-.dpad .break-toggle { left: 174px; top: 26px; width: 44px; height: 44px; }
+/* ---- Action dock (bottom) ----
+   One row across the bottom: directions | abilities + hint | actions.
+   Laying these out in a single flow is what stops the skill labels, the
+   hint and the pads from overlapping — they used to be positioned
+   independently at hand-tuned `bottom:` offsets and collided whenever a
+   label ran long or the viewport changed. */
+/* Named grid areas rather than flex-wrap: with wrap, whether the actions
+   landed beside the pad or on a third row depended on how wide the pad
+   happened to be at that breakpoint. The areas make it explicit. */
+.dock {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: grid; gap: 10px 14px; align-items: end;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "left center right";
+  padding: 0 16px 14px;
+  background: linear-gradient(0deg, rgba(6,9,16,0.92) 30%, rgba(6,9,16,0));
+}
+.dock-side { display: flex; align-items: flex-end; }
+.dock-left { grid-area: left; }
+.dock-right { grid-area: right; flex-direction: column; gap: 8px; align-items: stretch; }
+/* The centre column is the only flexible one, so long hint text reflows
+   instead of pushing the controls off-screen. */
+.dock-center {
+  grid-area: center; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding-bottom: 2px;
+}
+
+.pad { display: none; }
+.pad.active { display: grid; }
+/* A real 3x3 d-pad grid rather than five absolutely-placed buttons. */
+.dpad {
+  grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(2, 42px);
+  gap: 5px; align-items: center;
+}
+.dpad .up { grid-column: 2; grid-row: 1; }
+.dpad .left { grid-column: 1; grid-row: 2; }
+.dpad .down { grid-column: 2; grid-row: 2; }
+.dpad .right { grid-column: 3; grid-row: 2; }
+.dpad .break-toggle { grid-column: 3; grid-row: 1; }
 .break-toggle.armed { background: rgba(255,77,94,0.35); border-color: var(--watcher); box-shadow: 0 0 14px rgba(255,77,94,0.5); }
 
-.wpad { left: 18px; display: none; gap: 6px; flex-wrap: wrap; max-width: 60vw; }
-.wpad.active { display: flex; }
-.wpad .tbtn { width: 44px; height: 44px; }
+/* Compass: rotate handles flanking the four claim buttons, so the two
+   different verbs (aim the real gaze / claim a direction) read as two
+   different things instead of one undifferentiated row of six. */
+.wpad { grid-auto-flow: column; align-items: center; gap: 8px; }
+.wpad.active { display: grid; }
+.wpad-dirs { display: grid; grid-template-columns: repeat(4, 42px); gap: 5px; }
+.wpad .rot { width: 40px; height: 40px; font-size: 17px; opacity: 0.9; }
+.wpad .tbtn { width: 42px; height: 42px; font-size: 14px; font-weight: 700; }
 
 .tbtn {
-  background: rgba(20,26,44,0.8); border: 1px solid var(--line); color: var(--text);
+  background: rgba(20,26,44,0.82); border: 1px solid var(--line); color: var(--text);
   border-radius: 10px; font-size: 18px; cursor: pointer;
+  display: grid; place-items: center; transition: background .12s, border-color .12s;
 }
-.tbtn:active { background: rgba(90,212,230,0.25); }
-
-.right-controls {
-  position: absolute; right: 18px; bottom: 14px;
-  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
-}
+.tbtn:hover { background: rgba(90,212,230,0.14); border-color: rgba(90,212,230,0.4); }
+.tbtn:active { background: rgba(90,212,230,0.28); }
 .actbtn, .viewbtn {
   padding: 12px 18px; border-radius: 10px; font-size: 15px; font-weight: 600;
   background: rgba(20,26,44,0.85); border: 1px solid var(--line); color: var(--text); cursor: pointer;
@@ -222,10 +274,85 @@ html, body {
 .pass-sub { color: var(--muted); margin: 0 0 8px; text-align: center; }
 .pass-prompt { color: var(--muted); margin: 0; text-align: center; font-size: 13px; opacity: 0.8; }
 
+/* ---- Narrow screens ----
+   The rail keeps its one line by shedding the least important group and
+   shrinking type, and the dock drops to two rows (controls, then actions)
+   so nothing is pushed off the edge. */
+@media (max-width: 780px) {
+  .stat-group.secondary { display: none; }  /* You/View are inferable from the scene */
+  .topbar { gap: 8px; padding: 6px 10px; }
+  .stat-group { gap: 10px; padding-right: 8px; }
+  .stat-group.primary .val { font-size: 16px; }
+  .stat .val { font-size: 13px; }
+  .stat .k { font-size: 7px; letter-spacing: 1.2px; }
+  /* Icon-only buttons: the words are what forced the rail to wrap. */
+  .mini { padding: 6px 9px; }
+  .mini-label { display: none; }
+  .mini-icon { display: inline; font-size: 15px; line-height: 1; }
+
+  /* Phones: hint + abilities get their own full-width row above the
+     controls, and the actions sit beside the pad rather than under it. */
+  .dock {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "center center" "left right";
+    gap: 8px 10px; padding: 0 10px 12px;
+  }
+  .dock-center { gap: 8px; }
+  .dock-right { flex-direction: row; justify-content: flex-end; align-items: flex-end; }
+}
+
+/* Phones: the pad and the actions cannot share a row at this width — side by
+   side, the confirm button wrapped to three lines and sat on top of the
+   compass. One column, three stacked rows. */
+@media (max-width: 560px) {
+  .dock {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "center" "left" "right";
+    gap: 8px;
+  }
+  .dock-left { justify-self: start; }
+  .dock-right { justify-self: stretch; }
+  .dock-right .actbtn { flex: 1 1 auto; }
+  .actbtn, .viewbtn { white-space: nowrap; }
+  .hint { font-size: 11px; max-width: 100%; }
+  .dpad { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(2, 40px); }
+  .wpad-dirs { grid-template-columns: repeat(4, 38px); }
+  .wpad .tbtn { width: 38px; height: 38px; }
+  .wpad .rot { width: 36px; height: 36px; }
+  .actbtn, .viewbtn { padding: 10px 14px; font-size: 14px; }
+}
+
+/* Phones: the rail still has to be ONE line, so the vitals shed their
+   micro-labels (a row of pips and a compass word read fine without "MOVE" /
+   "ZONE" over them) while Turn and Round keep theirs. */
+@media (max-width: 520px) {
+  .topbar { gap: 7px; padding: 6px 8px; }
+  .stat-group { gap: 8px; padding-right: 7px; }
+  .stat-group.vitals .k { display: none; }
+  .stat-group.primary .val { font-size: 14px; }
+  .stat .val { font-size: 12px; }
+  .topbar-actions { gap: 4px; }
+  .mini { padding: 5px 8px; }
+  /* Zone is a WARNING. On a phone it earns its space only while a squad is
+     actually sweeping your quadrant; the rest of the time it is a word the
+     rail cannot afford. (Falls back to always-shown without :has support,
+     which is merely the old behaviour, not a broken one.) */
+  #zoneStat:not(:has(.hunted)) { display: none; }
+}
+/* Smallest phones: the Turn stat already names which of the crew is acting
+   ("Prisoner 2/3"), so the pips are the first thing that can go. */
+@media (max-width: 430px) {
+  .roster-stat { display: none; }
+  /* 320px-class screens: the widest value ("Prisoner 1/3") still has to fit
+     its box, or it gets clipped rather than merely tight. */
+  .topbar { gap: 6px; padding: 6px; }
+  .stat-group { gap: 7px; padding-right: 6px; }
+  .stat-group.primary .val { font-size: 13px; }
+  .stat .k { font-size: 7px; letter-spacing: 1px; }
+}
 @media (max-width: 640px) {
   .logo { font-size: 34px; letter-spacing: 6px; }
   .play-grid { grid-template-columns: 1fr; }
-  .stat .val { font-size: 13px; }
   .log { display: none; }
 }
 
@@ -269,36 +396,35 @@ html, body {
 
 /* ---- Carried items (prisoner) ------------------------------------------- */
 .item-bar {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: 150px; display: flex; gap: 10px; z-index: 6;
-  pointer-events: auto;
+  display: flex; gap: 8px; z-index: 6; pointer-events: auto;
+  flex-wrap: wrap; justify-content: center;
 }
 .item-bar.empty { display: none; }
+/* min-width, not a fixed width: the name sits INSIDE the chip now, so the
+   chip grows to fit its label. The label used to be absolutely positioned
+   under a fixed 54px box with `white-space: nowrap`, so anything longer than
+   the box ("Dispatch guards", "Remote lock") ran straight over its
+   neighbours — visible as overlapping text in the skill bar. */
 .item-chip {
-  position: relative; width: 54px; height: 54px; border-radius: 12px;
+  position: relative; min-width: 54px; padding: 6px 8px 5px; border-radius: 12px;
   background: rgba(12, 17, 30, 0.82); border: 1px solid #2f3c5c;
-  color: #dce6ff; font: inherit; cursor: pointer; display: grid;
-  place-items: center; line-height: 1;
+  color: #dce6ff; font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; line-height: 1;
   transition: border-color .12s, transform .12s, box-shadow .12s;
 }
-.item-chip .ic { font-size: 22px; }
+.item-chip .ic { font-size: 20px; }
 .item-chip .ik {
-  position: absolute; right: 5px; bottom: 3px;
-  font-size: 10px; opacity: .55;
+  position: absolute; right: 4px; top: 3px;
+  font-size: 9px; opacity: .5;
 }
 .item-chip:hover { border-color: #4a5f8f; }
 .item-chip.armed {
   border-color: #ffc75a; box-shadow: 0 0 12px rgba(255, 199, 90, .45);
   transform: translateY(-3px);
 }
-@media (max-width: 720px) {
-  .item-bar { bottom: 210px; }
-  .item-chip { width: 46px; height: 46px; }
-  .item-chip .ic { font-size: 19px; }
-}
+
 
 /* ---- Watcher skills ----------------------------------------------------- */
-.skill-bar { bottom: 150px; }
 .skill-chip .cd {
   position: absolute; right: 4px; bottom: 2px;
   font-size: 11px; font-weight: 700; color: #ffb4b4;
@@ -306,7 +432,6 @@ html, body {
 .skill-chip.cooling { opacity: .45; filter: grayscale(.7); cursor: default; }
 .skill-chip.unusable { opacity: .6; }
 .skill-chip:not(.cooling):not(.unusable) { border-color: #4a6f9f; }
-@media (max-width: 720px) { .skill-bar { bottom: 210px; } }
 .item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }
 .stat .val.urgent { color: #ff6b6b; animation: dangerPulse 1s ease-in-out infinite; }
 
@@ -330,13 +455,10 @@ html, body {
 /* Item/skill name, always visible — a title= tooltip only ever reached the
    one input scheme (mouse) that needed the help least. */
 .item-chip .iname {
-  position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%);
-  font-size: 10px; letter-spacing: .02em; white-space: nowrap;
+  font-size: 9px; letter-spacing: .02em; white-space: nowrap;
   color: #93a4c8; pointer-events: none;
 }
 .item-chip.armed .iname, .item-chip.padsel .iname { color: #ffc75a; }
-.item-bar { padding-bottom: 18px; }
-@media (max-width: 720px) { .item-chip .iname { font-size: 9px; bottom: -15px; } }
 
 /* ---- Suspicion readout (Watcher only) ------------------------------------
    The same per-quadrant noise/light/exit-bias score watcherAI.js already
