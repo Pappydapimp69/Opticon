@@ -23,6 +23,12 @@ echo
 echo "== zone hud (quadrant readout + watcher position-leak gate) =="
 node tests/zone-hud.mjs
 echo
+echo "== record (per-role W/L: counted once, right role/tier, persisted) =="
+node tests/record.mjs
+echo
+echo "== end-of-turn game over (a game that ends on YOUR turn still shows a result) =="
+node tests/end-of-turn-over.mjs
+echo
 echo "== turn-authority hud (hint/panel track who's really acting, not just game.turn) =="
 node tests/turn-authority-hud.mjs
 echo

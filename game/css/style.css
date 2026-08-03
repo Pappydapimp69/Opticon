@@ -83,6 +83,13 @@ html, body {
 .play-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,0.09); }
 .pb-title { font-size: 18px; font-weight: 700; }
 .pb-sub { font-size: 12px; color: var(--muted); }
+/* Per-difficulty W/L under each role. Dimmer than .pb-sub and set in the
+   tabular figures so the digits don't jitter as the record grows. */
+.pb-record {
+  font-size: 11px; letter-spacing: 0.04em; color: var(--muted); opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.pb-record:empty { display: none; }
 .prisoner-btn:hover { border-color: var(--prisoner); box-shadow: 0 8px 30px rgba(90,212,230,0.18); }
 .watcher-btn:hover { border-color: var(--watcher); box-shadow: 0 8px 30px rgba(255,107,122,0.18); }
 .hotseat-btn { grid-column: 1 / -1; }
@@ -202,7 +209,9 @@ html, body {
 #overlayTitle { font-size: 44px; letter-spacing: 6px; margin: 6px 0 12px; }
 #overlayTitle.escaped { color: var(--exit); text-shadow: 0 0 40px rgba(89,247,166,0.3); }
 #overlayTitle.captured { color: var(--watcher); text-shadow: 0 0 40px rgba(255,107,122,0.3); }
-#overlayText { color: var(--muted); margin: 0 0 20px; }
+/* pre-line: gameOver() joins the run summary and the running record with a
+   newline, so they read as two lines instead of one long run-on. */
+#overlayText { color: var(--muted); margin: 0 0 20px; white-space: pre-line; }
 .overlay-actions { display: flex; gap: 12px; justify-content: center; }
 .overlay-actions .play-btn { align-items: center; min-width: 130px; }
 

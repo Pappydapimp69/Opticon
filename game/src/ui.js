@@ -138,7 +138,9 @@ export class UI {
         : "The Watcher's gaze found you. The panopticon holds.";
     const roundWord = game.round === 1 ? "round" : "rounds";
     const stats = `${flavor} (${game.round} ${roundWord}${meta.difficulty ? `, ${meta.difficulty}` : ""})`;
-    this.el.overlayText.textContent = stats;
+    // The running record is the reason to press Play again, so it belongs on
+    // the screen that offers that button — not only back on the menu.
+    this.el.overlayText.textContent = meta.record ? `${stats}\n${meta.record}` : stats;
   }
 }
 
