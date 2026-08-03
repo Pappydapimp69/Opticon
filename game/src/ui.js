@@ -14,6 +14,8 @@ export class UI {
       roster: document.getElementById("rosterLabel"),
       facing: document.getElementById("facingLabel"),
       mp: document.getElementById("mpLabel"),
+      mpStat: document.getElementById("mpStat"),
+      gazeStat: document.getElementById("gazeStat"),
       round: document.getElementById("roundLabel"),
       view: document.getElementById("viewLabel"),
       overlay: document.getElementById("overlay"),
@@ -70,6 +72,13 @@ export class UI {
       : "?";
     this.el.facing.classList.toggle("staged", !!staged && !!showWatcherInfo);
     this.el.mp.textContent = "●".repeat(Math.max(0, p.mp)) + "○".repeat(Math.max(0, p.mpMax ? p.mpMax - p.mp : 3 - p.mp));
+    // Move is the Prisoner's resource; Gaze is the Watcher's. Showing both to
+    // both roles meant a Watcher read a movement meter that was never theirs
+    // and a Prisoner read a permanent "?" — two dead slots on a rail that has
+    // to fit one line on a phone.
+    const humanIsWatcher = humanRole === "Watcher";
+    if (this.el.mpStat) this.el.mpStat.classList.toggle("hidden", humanIsWatcher);
+    if (this.el.gazeStat) this.el.gazeStat.classList.toggle("hidden", !showWatcherInfo);
     // Show the cap, and warn once it's genuinely close — a limit nobody can
     // see isn't pressure, it's an ambush.
     this.el.round.textContent = `${game.round}/${ROUND_LIMIT}`;
