@@ -116,6 +116,52 @@ export class Renderer {
     return (gy - this.center.y) * TILE_W;
   }
 
+  // Which world cardinal (0=N,1=E,2=S,3=W) currently points toward the given
+  // SCREEN direction (0=up, 1=right, 2=down, 3=left)?
+  //
+  // A d-pad is a spatial control: "up" means the top of the screen, not a
+  // fixed compass bearing. The camera here is never at a fixed bearing — the
+  // Watcher view swings to face the gaze and the other views orbit freely —
+  // so a hardcoded up=North sends guards somewhere other than where the
+  // player pointed as soon as the camera has turned.
+  //
+  // Resolved by PROJECTING each world cardinal through the live camera and
+  // picking the one whose on-screen direction best matches the requested one,
+  // rather than deriving it from the camera's yaw: projection is the same
+  // transform that put the map on screen in the first place, so it stays
+  // correct for any camera pose without a separate handedness/sign
+  // convention to get wrong (and to silently invert).
+  screenDirToWorld(screenDir) {
+    const want = [
+      { x: 0, y: 1 },  // up    (NDC y is +up)
+      { x: 1, y: 0 },  // right
+      { x: 0, y: -1 }, // down
+      { x: -1, y: 0 }, // left
+    ][screenDir];
+    if (!want || !this.camera) return screenDir;
+    this.camera.updateMatrixWorld();
+    const originV = new THREE.Vector3(this.worldX(this.center.x), 0, this.worldZ(this.center.y));
+    const origin = originV.clone().project(this.camera);
+    let best = screenDir;
+    let bestDot = -Infinity;
+    for (let d = 0; d < 4; d++) {
+      const v = DIR_VEC[d];
+      const probe = new THREE.Vector3(
+        originV.x + v.dx * TILE_W * 4,
+        0,
+        originV.z + v.dy * TILE_W * 4
+      ).project(this.camera);
+      let dx = probe.x - origin.x;
+      let dy = probe.y - origin.y;
+      const len = Math.hypot(dx, dy);
+      if (!len || !Number.isFinite(len)) continue;
+      dx /= len; dy /= len;
+      const dot = dx * want.x + dy * want.y;
+      if (dot > bestDot) { bestDot = dot; best = d; }
+    }
+    return best;
+  }
+
   dispose() {
     window.removeEventListener("resize", this._onResize);
     this.renderer.dispose();
@@ -617,6 +663,9 @@ export class Renderer {
   // Per-frame update. `game` is current state; `dt` seconds.
   update(game, dt, opts = {}) {
     this.time += dt;
+    // Stashed for computeCameraTarget(), which runs on its own from
+    // updateCamera() and has no access to this frame's opts.
+    this.previewFacing = opts.previewFacing != null ? opts.previewFacing : null;
     const map = game.map;
     // Camera/FoV/path-preview below are about the HUMAN's own vantage point,
     // not whoever's turn is currently resolving — `game.activePrisoner`
@@ -669,7 +718,12 @@ export class Renderer {
     }
 
     // Eye faces watcher facing; color shifts if it just scanned.
-    const facing = game.watcher.facing;
+    // `previewFacing` is a STAGED, uncommitted rotation (main.js). Aiming it
+    // is only meaningful if the eye and the gaze wedge actually swing to it —
+    // previewing a direction you cannot see is the same blind guess the
+    // staging exists to remove. The rules still hold the old facing until the
+    // player commits; this is presentation only.
+    const facing = opts.previewFacing != null ? opts.previewFacing : game.watcher.facing;
     const eyeAngle = [Math.PI, -Math.PI / 2, 0, Math.PI / 2][facing];
     if (this.eye) {
       // Position the eye offset toward facing direction on top of tower.
@@ -924,7 +978,7 @@ export class Renderer {
 
     if (this.viewMode === "watcher") {
       // High over the tower looking outward toward the facing direction.
-      const v = DIR_VEC[game.watcher.facing];
+      const v = DIR_VEC[this.previewFacing != null ? this.previewFacing : game.watcher.facing];
       tTarget.set(towerX + v.dx * 8, 0, towerZ + v.dy * 8);
       tPos.set(towerX - v.dx * 4, this.playRadius * 1.5 + 6, towerZ - v.dy * 4);
     } else if (this.viewMode === "overview") {

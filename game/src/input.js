@@ -263,11 +263,16 @@ export class Input {
     // because the face buttons below can only reach 3 of 4 directions (Y/B/X
     // — A is taken by endTurn), so South had NO gamepad route at all for
     // bluff or DISPATCH's quadrant pick until now.
-    if (edge(12)) { this.onIntent(breakMod ? "break" : "move", 0); this.onIntent("bluff", 0); }
-    if (edge(15)) { this.onIntent(breakMod ? "break" : "move", 1); this.onIntent("bluff", 1); }
-    if (edge(13)) { this.onIntent(breakMod ? "break" : "move", 2); this.onIntent("bluff", 2); }
-    if (edge(14)) { this.onIntent(breakMod ? "break" : "move", 3); this.onIntent("bluff", 3); }
-    if (stickDir != null) { this.onIntent(breakMod ? "break" : "move", stickDir); this.onIntent("bluff", stickDir); }
+    // The direction sent alongside the move is "bluffScreen", not "bluff":
+    // a d-pad/stick push is SPATIAL — up means the top of the screen — so
+    // main.js resolves it against the live camera. The labelled N/E/S/W
+    // touch buttons and the number keys stay on absolute "bluff", because
+    // those name a compass bearing outright and must not be re-aimed.
+    if (edge(12)) { this.onIntent(breakMod ? "break" : "move", 0); this.onIntent("bluffScreen", 0); }
+    if (edge(15)) { this.onIntent(breakMod ? "break" : "move", 1); this.onIntent("bluffScreen", 1); }
+    if (edge(13)) { this.onIntent(breakMod ? "break" : "move", 2); this.onIntent("bluffScreen", 2); }
+    if (edge(14)) { this.onIntent(breakMod ? "break" : "move", 3); this.onIntent("bluffScreen", 3); }
+    if (stickDir != null) { this.onIntent(breakMod ? "break" : "move", stickDir); this.onIntent("bluffScreen", stickDir); }
     if (edge(0)) this.onIntent("endTurn");   // A
     if (edge(4)) this.onIntent("rotate", -1); // LB
     if (edge(5)) this.onIntent("rotate", 1);  // RB

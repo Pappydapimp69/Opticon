@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.44.0";
+const BUILD = "beta-0.45.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -76,6 +76,12 @@ const app = {
   // in one slot prevents Dispatch and Double Bluff from competing for the
   // same next direction press.
   armedSkill: null,
+  // The Watcher's previewed gaze, mirroring stagedPath on the Prisoner side.
+  // rotateWatcher() sets rotatedThisTurn and cannot be undone, so firing it
+  // straight off the button meant one stray LB/RB locked your gaze for the
+  // whole turn with no way to cancel or pick the other way. Nothing reaches
+  // the rules until the same confirm control the Prisoner uses.
+  stagedFacing: null,
   // checkOver() has four call sites (turn handoffs, the AI loops, and the
   // walk-animation drain), and the first thing it does — app.running = false
   // — does not stop the later ones from re-entering while isOver() is still
@@ -399,7 +405,7 @@ function dismissPassDevice() {
   }
   app.running = true;
   app.input.mode = "game";
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -594,6 +600,7 @@ function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
   app.stagedPath = [];
   app.armedSkill = null;
+  app.stagedFacing = null;
   app.resultRecorded = false;
   breakArmed = false;
   updateBreakToggleUI();
@@ -620,7 +627,7 @@ function startGame(overrides = {}) {
   app.audio.resume();
   app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
-  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(app.game, shouldShowWatcherInfo());
   updateCommitButton();
 
@@ -669,7 +676,7 @@ function updateCommitButton() {
   if (g.turn === "Prisoner") {
     btn.textContent = app.stagedPath.length ? "Commit Move" : "End Turn";
   } else {
-    btn.textContent = "Scan & End Turn";
+    btn.textContent = hasStagedRotation() ? "Commit Turn" : "Scan & End Turn";
   }
 }
 
@@ -699,7 +706,7 @@ function hintFor() {
         ? "Stick / D-pad: extend or undo the path  ·  A: commit the move  ·  Start: change view"
         : "Left stick / D-pad: plan a path  ·  A: end turn  ·  Hold RB + direction: break a window" + (carrying ? "  ·  LT: pick item, RT: use" : "") + "  ·  Start: change view";
     }
-    return "LB / RB: rotate gaze  ·  D-pad: bluff/target  ·  LT: pick skill, RT: arm/use  ·  A: scan & end turn  ·  Start: change view";
+    return "LB / RB: aim the gaze (A confirms)  ·  D-pad: bluff/target, matched to the screen  ·  LT: pick skill, RT: arm/use  ·  A: scan & end turn  ·  Start: change view";
   }
   if (scheme === "touch") {
     if (prisoner) {
@@ -714,7 +721,7 @@ function hintFor() {
       ? "WASD / arrows: extend or undo the path  ·  Space: commit the move  ·  V: view"
       : "WASD / arrows: plan a path  ·  Shift + direction: break a window" + (carrying ? "  ·  1-2: use an item" : "") + "  ·  Space: end turn  ·  V: view  ·  reach the green gate";
   }
-  return "Q / E: rotate 90°  ·  1-4: bluff/target  ·  5-9: skills  ·  Space: scan & end turn  ·  V: view";
+  return "Q / E: aim the gaze (Space confirms)  ·  1-4: bluff/target  ·  5-9: skills  ·  Space: scan & end turn  ·  V: view";
 }
 
 // ---- Intent handling -----------------------------------------------------
@@ -740,7 +747,7 @@ function handleIntent(intent, arg) {
   } else {
     handleWatcherIntent(intent, arg);
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
 }
 
@@ -874,7 +881,7 @@ function doBreakWindow(dir) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -931,7 +938,7 @@ function doUseItem(kind, dirOrNull) {
     app.audio.play("blocked");
   }
   updateItemBar();
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1091,7 +1098,7 @@ function doUseSkill(skill) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(showSkillResult(skill, r));
   updateCommitButton();
@@ -1211,6 +1218,76 @@ function resetStagedPath() {
   if (app.stagedPath.length) app.stagedPath = [];
 }
 
+// ---- Watcher: staged rotation -------------------------------------------
+
+// The gaze the player is currently LOOKING at — the preview if one is staged,
+// otherwise the committed facing. Everything player-facing (HUD, gaze cone,
+// camera) reads this so the preview is something you can actually see and
+// judge before spending the turn's single rotation on it.
+function effectiveFacing() {
+  const g = app.game;
+  if (!g) return 0;
+  return app.stagedFacing != null ? app.stagedFacing : g.watcher.facing;
+}
+
+function hasStagedRotation() {
+  const g = app.game;
+  return !!g && app.stagedFacing != null && app.stagedFacing !== g.watcher.facing;
+}
+
+function clearStagedRotation() {
+  app.stagedFacing = null;
+}
+
+// One 90° step per turn is the rule, so the preview is clamped to the two
+// neighbours of the committed facing. That clamp is what makes cancelling and
+// switching sides fall out for free: from base, LB/RB pick a side; from a
+// staged side, the opposite key walks back to base (cancel) and the same key
+// is a no-op rather than an illegal 180.
+function stageRotation(delta) {
+  const g = app.game;
+  if (!g || g.turn !== "Watcher") return;
+  if (g.watcher.rotatedThisTurn) {
+    app.audio.play("blocked");
+    app.ui.hint("Already rotated this turn — Scan & End Turn when ready");
+    return;
+  }
+  const base = g.watcher.facing;
+  const cur = effectiveFacing();
+  const offset = (cur - base + 4) % 4; // 0 = none, 1 = clockwise, 3 = ccw
+  let next = offset === 0 ? (base + delta + 4) % 4
+    : (offset === 1 && delta < 0) || (offset === 3 && delta > 0) ? base
+      : cur; // same side again would be a 180 — refuse rather than silently allow
+  if (next === cur) {
+    app.audio.play("blocked");
+  } else {
+    app.stagedFacing = next === base ? null : next;
+    app.audio.play("rotate");
+  }
+  afterWatcherStateChange();
+}
+
+// Spend the turn's rotation for real. Separate from staging so the rules only
+// ever see a deliberate, confirmed choice.
+function commitStagedRotation() {
+  const g = app.game;
+  if (!g || !hasStagedRotation()) return;
+  const delta = ((app.stagedFacing - g.watcher.facing + 4) % 4) === 1 ? 1 : -1;
+  const r = rotateWatcher(g, delta);
+  clearStagedRotation();
+  app.audio.play(r.ok ? "rotate" : "blocked");
+  afterWatcherStateChange();
+}
+
+function afterWatcherStateChange() {
+  const g = app.game;
+  if (!g) return;
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), effectiveFacing());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+  app.ui.hint(hintFor());
+  updateCommitButton();
+}
+
 // Extend or retract the staged path by one tile in `dir`. Doors and switches
 // don't relocate the character, so they resolve immediately — but only when
 // adjacent to the prisoner's REAL position (path empty); previewing "through"
@@ -1243,7 +1320,7 @@ function stagePathExtend(dir) {
       if (r.ok) {
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
-        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
         app.ui.renderLog(g, shouldShowWatcherInfo());
       }
     } else {
@@ -1284,7 +1361,7 @@ function commitStagedPath() {
   app.stagedPath = [];
   animatingPrisoner = g.activePrisoner;
   app.renderer.walkTo(animatingPrisoner, fromTile, walkSteps);
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1324,8 +1401,13 @@ function handleWatcherIntent(intent, arg) {
   if (!humanControlsWatcher()) return;
   const g = app.game;
   if (intent === "rotate") {
-    if (rotateWatcher(g, arg).ok) app.audio.play("rotate");
-  } else if (intent === "bluff") {
+    stageRotation(arg);
+  } else if (intent === "bluff" || intent === "bluffScreen") {
+    // A spatial control (d-pad / stick) means a direction ON SCREEN; resolve
+    // it against the live camera so "up" is always the top of the map as
+    // drawn. Labelled controls (the N/E/S/W buttons, keys 1-4) name a compass
+    // bearing and arrive as plain "bluff", already absolute.
+    if (intent === "bluffScreen") arg = app.renderer.screenDirToWorld(arg);
     if (app.armedSkill === SKILLS.DOUBLE_BLUFF || app.armedSkill === SKILLS.DISPATCH) {
       // Same direction controls, reinterpreted as the target for whichever
       // explicit two-step skill the player armed.
@@ -1338,7 +1420,7 @@ function handleWatcherIntent(intent, arg) {
         app.armedSkill = skill;
       }
       app.audio.play(r.ok ? "skill" : "blocked");
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
       app.ui.renderLog(g, shouldShowWatcherInfo());
       app.ui.hint(showSkillResult(skill, r));
       updateSkillBar();
@@ -1360,6 +1442,13 @@ function handleWatcherIntent(intent, arg) {
   } else if (intent === "skill") {
     doUseSkill(arg);
   } else if (intent === "endTurn") {
+    // Same overloaded confirm as the Prisoner's: a staged rotation commits
+    // first, and only a second press scans and ends the turn — so the gaze
+    // you spend the turn on is always one you confirmed on purpose.
+    if (hasStagedRotation()) {
+      commitStagedRotation();
+      return;
+    }
     app.armedSkill = null;
     // Scan (commit), then end turn.
     const scan = watcherScan(g, exposureTier());
@@ -1421,7 +1510,7 @@ function scheduleAiWatcher() {
     }
     app.aiThinking = false;
     checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
     app.ui.renderLog(g, shouldShowWatcherInfo());
     // playWatcherTurn already advanced to the next prisoner internally — if
     // that's a companion (not prisoner 0), its AI turn plays automatically
@@ -1462,7 +1551,7 @@ function scheduleAiPrisoner() {
       endPrisonerTurn(g);
       app.aiThinking = false;
       checkOver();
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
       // endPrisonerTurn always hands off to the Watcher — but with AI
       // companions, this can fire in single-player Prisoner mode too, where
       // the Watcher is ALSO AI, not the human waiting on this banner.
@@ -1576,7 +1665,7 @@ function cycleView() {
 function setView(mode) {
   app.viewMode = mode;
   app.renderer.setViewMode(mode);
-  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn());
+  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
 }
 
 // ---- End condition -------------------------------------------------------
@@ -1660,6 +1749,12 @@ function loop(t) {
     app.armedSkill = null;
     updateSkillBar();
   }
+  // A previewed gaze belongs to the Watcher's own turn only — the same
+  // cleanup the staged path and armed item get above.
+  if (app.game && app.game.turn !== "Watcher" && app.stagedFacing != null) {
+    clearStagedRotation();
+    updateCommitButton();
+  }
   if (app.renderer && app.game) {
     const viewedPrisoner = app.game.prisoners[humanPrisonerIndex()];
     // During the cutscene, avatar visibility follows the SAME gate the
@@ -1672,6 +1767,7 @@ function loop(t) {
     const result = app.renderer.update(app.game, dt, {
       showPrisoner,
       showWatcherInfo: shouldShowWatcherInfo(),
+      previewFacing: app.stagedFacing,
       stagedPath: app.stagedPath,
       viewedPrisoner: humanPrisonerIndex(),
       selfNoise: (viewedPrisoner && viewedPrisoner.selfNoise) || [],

@@ -49,7 +49,12 @@ export class UI {
   // movement D-pad (and its on-screen hint text) appear during the AI's own
   // turn — controls that would silently no-op if tapped, since input
   // handling is already correctly gated elsewhere, but confusing to see.
-  updateHud(game, viewMode, humanRole, showWatcherInfo, humanControlsTurn) {
+  // `previewFacing`: the gaze the player is currently AIMING (a staged, not
+  // yet committed rotation), or undefined when there is nothing staged. Shown
+  // with a marker so a preview can never be mistaken for the real facing —
+  // the whole point of staging is to decide before spending the turn's one
+  // rotation, which needs the preview to be visibly provisional.
+  updateHud(game, viewMode, humanRole, showWatcherInfo, humanControlsTurn, previewFacing) {
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
     // With AI companions in play, name which one is acting — otherwise a
     // group of 3 reads identically to a lone prisoner on the Turn stat.
@@ -58,9 +63,12 @@ export class UI {
         ? `Prisoner ${game.activePrisoner + 1}/${game.prisoners.length}`
         : game.turn;
     this.el.turn.className = "val " + (game.turn === "Watcher" ? "watcher" : "prisoner");
+    const staged = previewFacing != null && previewFacing !== game.watcher.facing;
     this.el.facing.textContent = showWatcherInfo
-      ? DIRS[game.watcher.facing] + (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")
+      ? (staged ? `${DIRS[previewFacing]} ?` : DIRS[game.watcher.facing]) +
+        (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")
       : "?";
+    this.el.facing.classList.toggle("staged", !!staged && !!showWatcherInfo);
     this.el.mp.textContent = "●".repeat(Math.max(0, p.mp)) + "○".repeat(Math.max(0, p.mpMax ? p.mpMax - p.mp : 3 - p.mp));
     // Show the cap, and warn once it's genuinely close — a limit nobody can
     // see isn't pressure, it's an ambush.

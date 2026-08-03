@@ -29,6 +29,9 @@ echo
 echo "== end-of-turn game over (a game that ends on YOUR turn still shows a result) =="
 node tests/end-of-turn-over.mjs
 echo
+echo "== watcher aim/commit (screen-relative d-pad + staged rotation) =="
+node tests/watcher-aim-commit.mjs
+echo
 echo "== turn-authority hud (hint/panel track who's really acting, not just game.turn) =="
 node tests/turn-authority-hud.mjs
 echo
