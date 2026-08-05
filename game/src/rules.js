@@ -87,6 +87,11 @@ export function createGame(map, opts = {}) {
       // Unused for a human-controlled prisoner. See prisonerAI.js.
       stalledTurns: 0,
       bestDistToExit: Infinity,
+      // AI-only: this prisoner's BELIEF about where the eye is pointed, as a
+      // distribution over the four facings. Starts as a flat guess because
+      // that is genuinely all a prisoner knows at spawn. Never the truth —
+      // see prisonerAI.js updateGazeBelief for what is allowed to move it.
+      gazeBelief: [0.25, 0.25, 0.25, 0.25],
       // Cosmetic-only hook, unread by any current logic or renderer: reserves
       // the shape now so a future outfit/customization system (see
       // docs/cognitive-updates) doesn't need a data migration later. Must
@@ -154,6 +159,8 @@ export function createGame(map, opts = {}) {
     // needing something to remember to clear it — the same shape that
     // opticon#E28's bluff field got wrong by clearing at end-of-turn.
     gazeRevealedForRound: null,
+    // Last gaze-capture (see watcherScan). Public information.
+    lastCaught: null,
     openedDoors: new Set(), // global door state (shared world)
     brokenWindows: new Set(), // global, permanent — a broken window stays broken
     // Item tiles already collected, keyed y*size+x. A pickup is retired here
@@ -841,6 +848,11 @@ export function watcherScan(game, difficulty = "medium") {
     if (isExposed(game, p.x, p.y, difficulty)) {
       p.alive = false;
       caught = p;
+      // Where and when the gaze took someone. PUBLIC by construction — the
+      // capture is announced to everyone — and it is the strongest honest
+      // evidence a surviving prisoner ever gets about where the eye is
+      // actually pointed, since the rotation itself is watcherOnly.
+      game.lastCaught = { x: p.x, y: p.y, round: game.round };
       logMsg(game, `Watcher's gaze locks on — Prisoner ${p.id + 1} is caught!`);
       break;
     }
