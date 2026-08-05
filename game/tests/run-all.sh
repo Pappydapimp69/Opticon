@@ -35,6 +35,9 @@ echo
 echo "== watcher aim/commit (screen-relative d-pad + staged rotation) =="
 node tests/watcher-aim-commit.mjs
 echo
+echo "== risk routing (risk is a cost, not a wall; caution changes behaviour and costs tempo) =="
+node tests/risk-routing.mjs
+echo
 echo "== fair information (neither AI sees what its human counterpart cannot) =="
 node tests/fair-information.mjs
 echo
