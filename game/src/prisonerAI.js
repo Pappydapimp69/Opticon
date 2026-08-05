@@ -19,18 +19,86 @@ import {
 import { ITEM_KINDS, OBJ } from "./map.js";
 import { bfsPath, stepToward } from "./pathfind.js";
 
-// Is a tile a place the Watcher could capture you on (lit AND in the gaze)?
-// `believedFacing`, when set, means this prisoner was fooled this turn —
-// it judges risk ONLY by that (possibly wrong) direction instead of the
-// true facing. Note: `game.watcher.bluff` (the LIVE claim) only exists
-// during the Watcher's own turn and is already cleared by the time a
-// prisoner acts, so ground truth here is just the real facing — the
-// gullible check below is what gives a bluff any effect at all (via
-// `lastBluff`, a one-turn-stale snapshot of what was claimed).
-function dangerous(game, x, y, believedFacing) {
-  const lit = isLit(game, x, y);
-  if (!lit) return false;
-  return inWatcherGaze(game, believedFacing ?? game.watcher.facing, x, y);
+// ---- What a prisoner is allowed to know about the eye ---------------------
+//
+// This AI used to read `game.watcher.facing` — the TRUE gaze — directly. That
+// is the one fact the entire game exists to withhold: the rotation is logged
+// `watcherOnly`, the Gaze stat reads "?" for a Prisoner, and the whole point
+// of the bluff is to poison a guess the AI was never actually making. An AI
+// that knows the answer is not playing the same game as the human beside it.
+//
+// So it now carries a BELIEF over the four facings, updated only from things
+// a human prisoner can also observe:
+//   * the Watcher's public CLAIM (`lastBluff`) — which may be a lie;
+//   * where a companion was just caught (`game.lastCaught`) — announced to
+//     everyone, and the strongest honest evidence there is;
+//   * the standing rule that the eye turns at most 90 deg per turn, which is
+//     printed in How-to-play and so is knowledge, not peeking.
+// It deliberately does NOT include "am I lit right now": the danger vignette
+// reports exposure (lit / noisy), not gaze coverage, so a human learns
+// nothing about the facing from it either.
+
+const UNIFORM = () => [0.25, 0.25, 0.25, 0.25];
+
+function normalize(b) {
+  const sum = b.reduce((a, v) => a + v, 0) || 1;
+  for (let i = 0; i < 4; i++) b[i] /= sum;
+  return b;
+}
+
+// Probability, under the current belief, that the gaze covers this tile.
+// Summed over facings rather than tested against one: the whole point is that
+// the prisoner does not know which facing is real.
+function gazeRisk(game, belief, x, y) {
+  let r = 0;
+  for (let d = 0; d < 4; d++) {
+    if (belief[d] > 0 && inWatcherGaze(game, d, x, y)) r += belief[d];
+  }
+  return r;
+}
+
+// A tile is only worth fearing if it is LIT (the capture rule needs exposure)
+// and the eye plausibly covers it. `caution` is the tier's risk appetite.
+function dangerous(game, x, y, belief, caution) {
+  if (!isLit(game, x, y)) return false;
+  return gazeRisk(game, belief, x, y) >= caution;
+}
+
+// One turn of belief revision, in evidence order: spread, then claim, then
+// the hard evidence of a body.
+function updateGazeBelief(game, p, tune) {
+  const b = p.gazeBelief && p.gazeBelief.length === 4 ? p.gazeBelief.slice() : UNIFORM();
+
+  // The eye turns at most 90 deg per turn, so yesterday's certainty is today's
+  // three-way maybe. Without this the belief would harden permanently on one
+  // direction after a single piece of evidence.
+  const spread = [0, 0, 0, 0];
+  for (let d = 0; d < 4; d++) {
+    spread[d] += b[d] * 0.5;
+    spread[(d + 1) % 4] += b[d] * 0.25;
+    spread[(d + 3) % 4] += b[d] * 0.25;
+  }
+  for (let d = 0; d < 4; d++) b[d] = spread[d];
+
+  // The public claim. `trustClaim` is exactly the lever the old `gullible`
+  // roll was: how much this prisoner takes the Watcher at its word. A hard
+  // prisoner ignores claims entirely, which is what makes bluffing a skill
+  // question rather than a dice roll.
+  if (game.watcher.lastBluff != null && tune.trustClaim > 0) {
+    b[game.watcher.lastBluff] += tune.trustClaim;
+  }
+
+  // A companion just died in a wedge. That wedge contained the gaze one turn
+  // ago; after the spread above, it still probably does.
+  const caught = game.lastCaught;
+  if (caught && game.round - caught.round <= 1) {
+    for (let d = 0; d < 4; d++) {
+      if (inWatcherGaze(game, d, caught.x, caught.y)) b[d] += tune.trustEvidence;
+    }
+  }
+
+  p.gazeBelief = normalize(b);
+  return p.gazeBelief;
 }
 
 // Direction (0..3) from a to b if adjacent, else -1.
@@ -82,17 +150,23 @@ const STALL_LIMIT = 3;
 //   avoidGaze — route around the whole watched quadrant (measured harmful;
 //               retained as a named, off-by-default knob so the refutation
 //               is reproducible rather than lost)
-// gullible — chance the prisoner trusts what the Watcher claimed LAST turn
-// (lastBluff) as the true gaze this turn, i.e. actually gets fooled. This is
-// the rules-level lever T25 said was still missing: previously a human
-// Watcher's bluff was pure cosmetic UI — the AI's danger check only ever
-// consulted the true facing (the live bluff field is already null by the
-// time a prisoner acts), so bluffing never opened a real blind spot. hard
-// never falls for it, matching the direction the other fields already set.
+// The bluff levers live in the belief model (see updateGazeBelief): a claim
+// is evidence, not a coin flip. Previously a human Watcher's bluff could only
+// matter through a `gullible` dice roll, and on hard that roll was 0 — so
+// against a hard prisoner, bluffing was provably inert. Now a claim always
+// moves the belief; how far is what the tier decides.
 export const PRISONER_SKILL = Object.freeze({
-  easy:   { caution: 0.0, dawdle: 0.6, useItems: false, avoidGaze: false, gullible: 0.55 },
-  medium: { caution: 1.0, dawdle: 0.4, useItems: true,  avoidGaze: false, gullible: 0.22 },
-  hard:   { caution: 1.0, dawdle: 0.0, useItems: true,  avoidGaze: false, gullible: 0 },
+  // caution — the belief threshold at which a lit tile counts as dangerous.
+  //   1.01 = never (nothing can exceed certainty), 0.5 = "more likely than
+  //   not", 0.25 = "a uniform guess is enough to spook me".
+  // trustClaim — how much weight this prisoner gives the Watcher's public
+  //   claim. Replaces the old `gullible` dice roll: an easy prisoner walks
+  //   into bluffs, a hard one ignores talk entirely.
+  // trustEvidence — weight given to where a companion was just caught, which
+  //   is the one piece of honest public evidence about the gaze.
+  easy:   { caution: 1.01, dawdle: 0.6, useItems: false, avoidGaze: false, trustClaim: 0.9, trustEvidence: 0.3 },
+  medium: { caution: 0.55, dawdle: 0.4, useItems: true,  avoidGaze: false, trustClaim: 0.35, trustEvidence: 0.9 },
+  hard:   { caution: 0.34, dawdle: 0.0, useItems: true,  avoidGaze: false, trustClaim: 0.0, trustEvidence: 1.4 },
 });
 // How far off-route the AI will detour to grab a pickup. MEASURED, not
 // guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
@@ -124,7 +198,7 @@ function nearbyItem(game, p) {
 // Spend carried items when they'd actually help THIS turn. Each check
 // mirrors the item's own precondition, so a use is never attempted that
 // rules.js would just refuse.
-function useItemsOpportunistically(game, p, committed, rng, believedFacing) {
+function useItemsOpportunistically(game, p, committed, rng, belief, tune) {
   // CUTTERS: standing next to a live switch, kill the circuit for good —
   // permanently removing light is worth more than any single turn's move.
   if (p.items.includes(ITEM_KINDS.CUTTERS)) {
@@ -151,7 +225,7 @@ function useItemsOpportunistically(game, p, committed, rng, believedFacing) {
   // DISTRACT: only when currently standing somewhere the Watcher could
   // catch us — throw the decoy AWAY from the exit so it pulls attention
   // off our actual route rather than onto it.
-  if (p.items.includes(ITEM_KINDS.DISTRACT) && p.mp >= 2 && dangerous(game, p.x, p.y, believedFacing)) {
+  if (p.items.includes(ITEM_KINDS.DISTRACT) && p.mp >= 2 && dangerous(game, p.x, p.y, belief, tune.caution)) {
     const exit = game.map.exit;
     const toExit = Math.abs(exit.x - p.x) > Math.abs(exit.y - p.y)
       ? (exit.x > p.x ? 1 : 3)
@@ -187,21 +261,25 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   // Rolled once per turn, not per tile: a fooled prisoner stays fooled for
   // the whole turn rather than re-guessing at every step.
-  let believedFacing = (tune.gullible > 0 && game.watcher.lastBluff != null && rng() < tune.gullible)
-    ? game.watcher.lastBluff
-    : null;
+  let belief = updateGazeBelief(game, p, tune);
 
-  // FEATHER: this AI reads game.watcher.facing directly, so true sight is
-  // worth nothing to it EXCEPT in the one state where its knowledge is
-  // actually wrong — when a bluff has fooled it this turn. Spending the
-  // feather there is the same trade a human makes (one-use certainty
-  // against a claim), and it stops the item being a dead slot in an AI's
-  // two-item belt. A non-fooled AI correctly hoards it.
-  if (believedFacing != null && p.items.includes(ITEM_KINDS.FEATHER)) {
-    if (useItem(game, ITEM_KINDS.FEATHER, null).ok) believedFacing = null;
+  // FEATHER: the item buys certainty, and certainty is only worth spending on
+  // when the prisoner is actually UNSURE and actually at risk. Spend it when
+  // the belief is still close to a guess (nothing above ~40%) and we intend
+  // to cross ground this turn; the answer then collapses the belief onto the
+  // truth for the rest of the round — the same trade a human makes.
+  if (tune.useItems && p.items.includes(ITEM_KINDS.FEATHER)) {
+    const confident = Math.max(...belief) >= 0.4;
+    if (!confident && p.mp >= 2 && useItem(game, ITEM_KINDS.FEATHER, null).ok) {
+      // Legitimate: the feather's entire purpose is to reveal the facing, and
+      // the reveal is surfaced to a human on the Gaze readout too.
+      belief = [0, 0, 0, 0];
+      belief[game.watcher.facing] = 1;
+      p.gazeBelief = belief;
+    }
   }
 
-  if (tune.useItems) useItemsOpportunistically(game, p, committed, rng, believedFacing);
+  if (tune.useItems) useItemsOpportunistically(game, p, committed, rng, belief, tune);
 
   // A short detour to a pickup, but never while committed — the whole point
   // of the commit state is that it stops making side trips.
@@ -209,7 +287,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
-    const avoid = committed ? null : buildAvoidSet(game, tune.avoidGaze, believedFacing);
+    const avoid = committed ? null : buildAvoidSet(game, tune, belief);
     const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
     const path = bfsPath(game.map, p.x, p.y, goal.x, goal.y, avoid);
     if (!path || path.length < 2) break;
@@ -222,7 +300,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
     // moved (so we can safely stop without wasting the turn), hold position —
     // unless we've committed, in which case danger no longer holds us back.
     if (!committed && rng() < tune.caution) {
-      const endsDangerous = dangerous(game, next.x, next.y, believedFacing);
+      const endsDangerous = dangerous(game, next.x, next.y, belief, tune.caution);
       const nearExit = Math.abs(p.x - exit.x) + Math.abs(p.y - exit.y) <= 2;
       if (endsDangerous && stepsThisTurn >= 1 && !nearExit) break;
     }
@@ -273,7 +351,7 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   return { steps: stepsThisTurn, path: walked, from: startPos };
 }
 
-function buildAvoidSet(game, avoidGaze, believedFacing) {
+function buildAvoidSet(game, tune, belief) {
   // Soft-avoid every currently dangerous tile. bfsPath falls back to ignoring
   // this set if no safe route exists, so it never deadlocks.
   const set = new Set();
@@ -286,7 +364,7 @@ function buildAvoidSet(game, avoidGaze, believedFacing) {
         const tx = l.x + xx;
         const ty = l.y + yy;
         if (tx < 0 || ty < 0 || tx >= size || ty >= size) continue;
-        if (dangerous(game, tx, ty, believedFacing)) set.add(`${tx},${ty}`);
+        if (dangerous(game, tx, ty, belief, tune.caution)) set.add(`${tx},${ty}`);
       }
     }
   }
@@ -294,11 +372,10 @@ function buildAvoidSet(game, avoidGaze, believedFacing) {
   // the tiles that happen to be lit inside it — the gaze is the thing that
   // will still be pointing there next turn. bfsPath falls back to ignoring
   // the set entirely when no route avoids it, so this can never deadlock.
-  if (avoidGaze) {
-    const g = believedFacing != null ? { facing: believedFacing } : game.watcher;
+  if (tune.avoidGaze) {
     for (let yy = 0; yy < size; yy++) {
       for (let xx = 0; xx < size; xx++) {
-        if (inWatcherGaze(game, g.facing, xx, yy)) set.add(`${xx},${yy}`);
+        if (gazeRisk(game, belief, xx, yy) >= tune.caution) set.add(`${xx},${yy}`);
       }
     }
   }

@@ -35,6 +35,9 @@ echo
 echo "== watcher aim/commit (screen-relative d-pad + staged rotation) =="
 node tests/watcher-aim-commit.mjs
 echo
+echo "== fair information (neither AI sees what its human counterpart cannot) =="
+node tests/fair-information.mjs
+echo
 echo "== golden feather (one round of true sight, facing only, expires) =="
 node tests/feather.mjs
 echo

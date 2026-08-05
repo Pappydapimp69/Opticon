@@ -195,12 +195,18 @@ function pickDispatchQuadrant(game) {
   return idx;
 }
 
+// The first open door, chosen WITHOUT looking at where anyone is standing.
+//
+// This used to skip doors a prisoner was occupying — reading `p.x`/`p.y`,
+// the exact information a Watcher is never given. It was only a pre-check
+// for a refusal the rules already enforce (useSkill returns `occupied`), so
+// removing it costs the AI nothing but a wasted attempt, which is precisely
+// what a human Watcher risks when they try the same thing blind.
 function firstOpenDoor(game) {
   for (const key of game.openedDoors) {
     const x = key % game.map.size;
     const y = Math.floor(key / game.map.size);
     if (objAt(game, x, y) !== 1 /* OBJ.DOOR */) continue;
-    if (game.prisoners.some((p) => p.alive && !p.escaped && p.x === x && p.y === y)) continue;
     return { x, y };
   }
   return null;
