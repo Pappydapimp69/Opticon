@@ -17,7 +17,7 @@ import {
   ITEM_CAP,
 } from "./rules.js";
 import { ITEM_KINDS, OBJ } from "./map.js";
-import { bfsPath, stepToward } from "./pathfind.js";
+import { costPath, stepToward } from "./pathfind.js";
 
 // ---- What a prisoner is allowed to know about the eye ---------------------
 //
@@ -164,9 +164,16 @@ export const PRISONER_SKILL = Object.freeze({
   //   into bluffs, a hard one ignores talk entirely.
   // trustEvidence — weight given to where a companion was just caught, which
   //   is the one piece of honest public evidence about the gaze.
-  easy:   { caution: 1.01, dawdle: 0.6, useItems: false, avoidGaze: false, trustClaim: 0.9, trustEvidence: 0.3 },
-  medium: { caution: 0.55, dawdle: 0.4, useItems: true,  avoidGaze: false, trustClaim: 0.35, trustEvidence: 0.9 },
-  hard:   { caution: 0.34, dawdle: 0.0, useItems: true,  avoidGaze: false, trustClaim: 0.0, trustEvidence: 1.4 },
+  // riskAversion — HOW MANY EXTRA TILES this prisoner will walk to avoid a
+  //   lit tile it is certain is watched. This is the lever that replaced the
+  //   binary avoid-set: risk is now priced into the route, so 0.25 ("no idea
+  //   where the eye is") buys a real, proportionate detour instead of falling
+  //   below a threshold and buying nothing. 0 = walks straight through.
+  // caution — still a THRESHOLD, but only for the genuinely binary calls:
+  //   hold position rather than step onto that tile, throw a decoy now.
+  easy:   { caution: 1.01, dawdle: 0.6, useItems: false, riskAversion: 0,  trustClaim: 0.9, trustEvidence: 0.3 },
+  medium: { caution: 0.55, dawdle: 0.4, useItems: true,  riskAversion: 5,  trustClaim: 0.35, trustEvidence: 0.9 },
+  hard:   { caution: 0.34, dawdle: 0.0, useItems: true,  riskAversion: 9,  trustClaim: 0.0, trustEvidence: 1.4 },
 });
 // How far off-route the AI will detour to grab a pickup. MEASURED, not
 // guessed: at 3 the balance sim's escape rate fell consistently (41/34/13%
@@ -287,9 +294,11 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
-    const avoid = committed ? null : buildAvoidSet(game, tune, belief);
+    // Risk is a COST, not a wall. `committed` (the anti-stall state) drops it
+    // to zero, which is the whole point of committing: stop paying to be safe.
+    const risk = committed || !tune.riskAversion ? null : riskPenalty(game, belief, tune);
     const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
-    const path = bfsPath(game.map, p.x, p.y, goal.x, goal.y, avoid);
+    const path = costPath(game.map, p.x, p.y, goal.x, goal.y, risk);
     if (!path || path.length < 2) break;
 
     const next = path[1];
@@ -351,33 +360,14 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   return { steps: stepsThisTurn, path: walked, from: startPos };
 }
 
-function buildAvoidSet(game, tune, belief) {
-  // Soft-avoid every currently dangerous tile. bfsPath falls back to ignoring
-  // this set if no safe route exists, so it never deadlocks.
-  const set = new Set();
-  const { size } = game.map;
-  // Only scan lit tiles in the two possible wedges (cheap enough at this scale).
-  for (const l of game.map.lights) {
-    if (!game.lightState[l.group]) continue;
-    for (let yy = -l.radius; yy <= l.radius; yy++) {
-      for (let xx = -l.radius; xx <= l.radius; xx++) {
-        const tx = l.x + xx;
-        const ty = l.y + yy;
-        if (tx < 0 || ty < 0 || tx >= size || ty >= size) continue;
-        if (dangerous(game, tx, ty, belief, tune.caution)) set.add(`${tx},${ty}`);
-      }
-    }
-  }
-  // A skilled prisoner treats the whole watched quadrant as risky, not just
-  // the tiles that happen to be lit inside it — the gaze is the thing that
-  // will still be pointing there next turn. bfsPath falls back to ignoring
-  // the set entirely when no route avoids it, so this can never deadlock.
-  if (tune.avoidGaze) {
-    for (let yy = 0; yy < size; yy++) {
-      for (let xx = 0; xx < size; xx++) {
-        if (gazeRisk(game, belief, xx, yy) >= tune.caution) set.add(`${xx},${yy}`);
-      }
-    }
-  }
-  return set;
+// Extra route cost for entering a tile, in units of "tiles walked". A tile
+// the prisoner is certain is both lit and watched costs `riskAversion` extra
+// steps; a tile it thinks is watched with probability 0.25 costs a quarter of
+// that. Continuous by construction, so uncertainty produces a proportionate
+// detour rather than falling off a threshold and producing nothing.
+function riskPenalty(game, belief, tune) {
+  return (x, y) => {
+    if (!isLit(game, x, y)) return 0;
+    return gazeRisk(game, belief, x, y) * tune.riskAversion;
+  };
 }
