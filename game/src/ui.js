@@ -56,7 +56,10 @@ export class UI {
   // with a marker so a preview can never be mistaken for the real facing —
   // the whole point of staging is to decide before spending the turn's one
   // rotation, which needs the preview to be visibly provisional.
-  updateHud(game, viewMode, humanRole, showWatcherInfo, humanControlsTurn, previewFacing) {
+  // `revealGaze`: a Golden Feather was spent this round, so the TRUE facing
+  // is shown to a Prisoner who would normally see "?". Narrower than
+  // showWatcherInfo on purpose — it unlocks the facing and nothing else.
+  updateHud(game, viewMode, humanRole, showWatcherInfo, humanControlsTurn, previewFacing, revealGaze) {
     const p = game.prisoners[game.activePrisoner] || game.prisoners[0];
     // With AI companions in play, name which one is acting — otherwise a
     // group of 3 reads identically to a lone prisoner on the Turn stat.
@@ -69,8 +72,14 @@ export class UI {
     this.el.facing.textContent = showWatcherInfo
       ? (staged ? `${DIRS[previewFacing]} ?` : DIRS[game.watcher.facing]) +
         (game.watcher.bluff != null ? `  (claims ${DIRS[game.watcher.bluff]})` : "")
-      : "?";
+      : revealGaze
+        ? `${DIRS[game.watcher.facing]} 🪶`
+        : "?";
     this.el.facing.classList.toggle("staged", !!staged && !!showWatcherInfo);
+    this.el.facing.classList.toggle("revealed", !showWatcherInfo && !!revealGaze);
+    // The Gaze slot is hidden for a Prisoner (it is a permanent "?"), but a
+    // spent feather is exactly the moment it has something to say.
+    if (this.el.gazeStat) this.el.gazeStat.classList.toggle("hidden", !showWatcherInfo && !revealGaze);
     this.el.mp.textContent = "●".repeat(Math.max(0, p.mp)) + "○".repeat(Math.max(0, p.mpMax ? p.mpMax - p.mp : 3 - p.mp));
     // Move is the Prisoner's resource; Gaze is the Watcher's. Showing both to
     // both roles meant a Watcher read a movement meter that was never theirs
@@ -78,7 +87,6 @@ export class UI {
     // to fit one line on a phone.
     const humanIsWatcher = humanRole === "Watcher";
     if (this.el.mpStat) this.el.mpStat.classList.toggle("hidden", humanIsWatcher);
-    if (this.el.gazeStat) this.el.gazeStat.classList.toggle("hidden", !showWatcherInfo);
     // Show the cap, and warn once it's genuinely close — a limit nobody can
     // see isn't pressure, it's an ambush.
     this.el.round.textContent = `${game.round}/${ROUND_LIMIT}`;

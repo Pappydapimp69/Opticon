@@ -434,6 +434,11 @@ html, body {
 .skill-chip:not(.cooling):not(.unusable) { border-color: #4a6f9f; }
 .item-chip.padsel { outline: 2px solid var(--prisoner); outline-offset: 3px; }
 .stat .val.urgent { color: #ff6b6b; animation: dangerPulse 1s ease-in-out infinite; }
+/* A staged (uncommitted) gaze, and a gaze bought with a Golden Feather. Two
+   different provisional states, two different colours: one is "I have not
+   spent this yet", the other is "this is true, and only for now". */
+.stat .val.staged { color: #ffc75a; }
+.stat .val.revealed { color: #ffd76a; text-shadow: 0 0 10px rgba(255,215,106,0.5); }
 
 /* ---- Zone (which quadrant the human prisoner is in) ---------------------
    Reuses dangerPulse rather than inventing a second alarm animation, so a

@@ -35,6 +35,9 @@ echo
 echo "== watcher aim/commit (screen-relative d-pad + staged rotation) =="
 node tests/watcher-aim-commit.mjs
 echo
+echo "== golden feather (one round of true sight, facing only, expires) =="
+node tests/feather.mjs
+echo
 echo "== hud layout (nothing overlaps, overflows, or is clipped at 5 viewports) =="
 node tests/hud-layout.mjs
 echo

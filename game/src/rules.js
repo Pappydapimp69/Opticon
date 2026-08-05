@@ -149,6 +149,11 @@ export function createGame(map, opts = {}) {
     log: [],
     status: "playing", // "playing" | "escaped" | "captured"
     winner: null, // "Prisoner" | "Watcher"
+    // Round number during which a Golden Feather was spent. Stored as the
+    // round rather than a boolean so it expires by comparison instead of
+    // needing something to remember to clear it — the same shape that
+    // opticon#E28's bluff field got wrong by clearing at end-of-turn.
+    gazeRevealedForRound: null,
     openedDoors: new Set(), // global door state (shared world)
     brokenWindows: new Set(), // global, permanent — a broken window stays broken
     // Item tiles already collected, keyed y*size+x. A pickup is retired here
@@ -401,6 +406,24 @@ export function useItem(game, kind, arg) {
     consume();
     logMsg(game, `Cloth wrapped — this turn's steps make no noise.`);
     return { ok: true, event: "muffle" };
+  }
+
+  // The Golden Feather: one turn of true sight of the eye.
+  //
+  // Every other item acts on the WORLD (noise, light, doors, your own
+  // footsteps). This one acts on the asymmetry itself, which is the only
+  // thing the panopticon actually runs on — the Watcher's real facing is
+  // hidden from a Prisoner by design, and the bluff exists to poison the
+  // guess. Spending the feather converts that guess into a fact for one
+  // turn. Deliberately does NOT cost MP: its cost is that you had to find
+  // it, you only get one, and knowing where the eye points is worth nothing
+  // unless you still have the moves left to act on it.
+  if (kind === ITEM_KINDS.FEATHER) {
+    if (game.gazeRevealedForRound === game.round) return { ok: false, reason: "already-revealed" };
+    game.gazeRevealedForRound = game.round;
+    consume();
+    logMsg(game, `The feather stills — the eye is looking ${DIRS[game.watcher.facing]}.`);
+    return { ok: true, event: "feather", facing: game.watcher.facing };
   }
 
   if (kind === ITEM_KINDS.DISTRACT) {

@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.46.0";
+const BUILD = "beta-0.47.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -405,7 +405,7 @@ function dismissPassDevice() {
   }
   app.running = true;
   app.input.mode = "game";
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -627,7 +627,7 @@ function startGame(overrides = {}) {
   app.audio.resume();
   app.audio.startMusic(); // continuous; idempotent if already playing
   app.ui.showHud();
-  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(app.game, shouldShowWatcherInfo());
   updateCommitButton();
 
@@ -747,7 +747,7 @@ function handleIntent(intent, arg) {
   } else {
     handleWatcherIntent(intent, arg);
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
 }
 
@@ -881,7 +881,7 @@ function doBreakWindow(dir) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -901,8 +901,8 @@ function armItemSlot(slot) {
     app.audio.play("blocked");
     return;
   }
-  if (kind === ITEM_KINDS.MUFFLE) {
-    doUseItem(kind, null);
+  if (kind === ITEM_KINDS.MUFFLE || kind === ITEM_KINDS.FEATHER) {
+    doUseItem(kind, null); // no target — resolves the moment it is spent
     return;
   }
   breakArmed = false;
@@ -938,7 +938,7 @@ function doUseItem(kind, dirOrNull) {
     app.audio.play("blocked");
   }
   updateItemBar();
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1098,7 +1098,7 @@ function doUseSkill(skill) {
   } else {
     app.audio.play("blocked");
   }
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(showSkillResult(skill, r));
   updateCommitButton();
@@ -1320,7 +1320,7 @@ function stagePathExtend(dir) {
       if (r.ok) {
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
-        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+        app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
         app.ui.renderLog(g, shouldShowWatcherInfo());
       }
     } else {
@@ -1361,7 +1361,7 @@ function commitStagedPath() {
   app.stagedPath = [];
   animatingPrisoner = g.activePrisoner;
   app.renderer.walkTo(animatingPrisoner, fromTile, walkSteps);
-  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
   updateCommitButton();
@@ -1420,7 +1420,7 @@ function handleWatcherIntent(intent, arg) {
         app.armedSkill = skill;
       }
       app.audio.play(r.ok ? "skill" : "blocked");
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
       app.ui.renderLog(g, shouldShowWatcherInfo());
       app.ui.hint(showSkillResult(skill, r));
       updateSkillBar();
@@ -1510,7 +1510,7 @@ function scheduleAiWatcher() {
     }
     app.aiThinking = false;
     checkOver();
-    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+    app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
     app.ui.renderLog(g, shouldShowWatcherInfo());
     // playWatcherTurn already advanced to the next prisoner internally — if
     // that's a companion (not prisoner 0), its AI turn plays automatically
@@ -1551,7 +1551,7 @@ function scheduleAiPrisoner() {
       endPrisonerTurn(g);
       app.aiThinking = false;
       checkOver();
-      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+      app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
       // endPrisonerTurn always hands off to the Watcher — but with AI
       // companions, this can fire in single-player Prisoner mode too, where
       // the Watcher is ALSO AI, not the human waiting on this banner.
@@ -1652,6 +1652,16 @@ function shouldShowWatcherInfo() {
   return false; // single-player Prisoner (vs AI Watcher)
 }
 
+// Deliberately SEPARATE from shouldShowWatcherInfo(). That gate answers "is
+// this viewer the Watcher"; this one answers "has this viewer bought one
+// turn of true sight with a Golden Feather". Folding the feather into the
+// role gate would leak everything else the Watcher sees (bluff claims, skill
+// readiness, the suspicion read) — the feather buys the facing, nothing more.
+function shouldRevealGaze() {
+  const g = app.game;
+  return !!g && g.gazeRevealedForRound === g.round;
+}
+
 function cycleView() {
   // A pure Watcher can't peek through the prisoner's eyes.
   const order =
@@ -1665,7 +1675,7 @@ function cycleView() {
 function setView(mode) {
   app.viewMode = mode;
   app.renderer.setViewMode(mode);
-  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing);
+  if (app.ui && app.game) app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
 }
 
 // ---- End condition -------------------------------------------------------

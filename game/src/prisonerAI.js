@@ -187,9 +187,19 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
 
   // Rolled once per turn, not per tile: a fooled prisoner stays fooled for
   // the whole turn rather than re-guessing at every step.
-  const believedFacing = (tune.gullible > 0 && game.watcher.lastBluff != null && rng() < tune.gullible)
+  let believedFacing = (tune.gullible > 0 && game.watcher.lastBluff != null && rng() < tune.gullible)
     ? game.watcher.lastBluff
     : null;
+
+  // FEATHER: this AI reads game.watcher.facing directly, so true sight is
+  // worth nothing to it EXCEPT in the one state where its knowledge is
+  // actually wrong — when a bluff has fooled it this turn. Spending the
+  // feather there is the same trade a human makes (one-use certainty
+  // against a claim), and it stops the item being a dead slot in an AI's
+  // two-item belt. A non-fooled AI correctly hoards it.
+  if (believedFacing != null && p.items.includes(ITEM_KINDS.FEATHER)) {
+    if (useItem(game, ITEM_KINDS.FEATHER, null).ok) believedFacing = null;
+  }
 
   if (tune.useItems) useItemsOpportunistically(game, p, committed, rng, believedFacing);
 

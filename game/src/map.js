@@ -36,6 +36,10 @@ export const ITEM_KINDS = Object.freeze({
   MUFFLE: "muffle", // this turn's movement noise is suppressed
   LOCKPICK: "lockpick", // open an adjacent door for free (normally costs 1 MP)
   CUTTERS: "cutters", // at an adjacent switch: kill that light group permanently
+  // Plucked from the all-seeing bird. The one thing this game keeps from a
+  // Prisoner is where the eye is actually pointed — bluffs exist precisely to
+  // poison that guess. The feather answers it, once.
+  FEATHER: "feather",
 });
 
 export const ITEM_INFO = Object.freeze({
@@ -43,6 +47,7 @@ export const ITEM_INFO = Object.freeze({
   [ITEM_KINDS.MUFFLE]: { label: "Muffle", icon: "🧣", requires: null },
   [ITEM_KINDS.LOCKPICK]: { label: "Lockpick", icon: "🗝️", requires: OBJ.DOOR },
   [ITEM_KINDS.CUTTERS]: { label: "Cutters", icon: "✂️", requires: OBJ.SWITCH },
+  [ITEM_KINDS.FEATHER]: { label: "Golden Feather", icon: "🪶", requires: null },
 });
 
 export const DIRS = Object.freeze(["North", "East", "South", "West"]);
