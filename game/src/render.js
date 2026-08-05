@@ -40,6 +40,7 @@ const ITEM_LOOK = {
   muffle:   { color: 0xc792ea, geo: () => new THREE.TorusGeometry(0.17, 0.07, 8, 16) }, // cloth loop
   lockpick: { color: 0x7fd1ff, geo: () => new THREE.ConeGeometry(0.16, 0.42, 4) },      // key spike
   cutters:  { color: 0xff8b6b, geo: () => new THREE.OctahedronGeometry(0.22) },         // blades
+  feather:  { color: 0xffd76a, geo: () => new THREE.CylinderGeometry(0.02, 0.12, 0.5, 6) }, // quill
   _default: { color: 0xffc75a, geo: () => new THREE.OctahedronGeometry(0.22) },
 };
 
