@@ -32,6 +32,17 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(500);
   await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
+  // Wait for the HUMAN's own prisoner (index 0) to actually hold the turn.
+  // The game opens on an AI companion and the AI drives turns on a timer, so
+  // setting `g.turn = "Prisoner"` below is not enough: if a companion is the
+  // active prisoner, handlePrisonerIntent ignores the keypress outright and
+  // the walk never happens. That made this test fail about one run in three,
+  // with the failure looking like a broken escape rather than a race.
+  await page.waitForFunction(() => {
+    const a = window.__opticon;
+    return a && a.game && !a.aiThinking && a.game.turn === "Prisoner" && a.game.activePrisoner === 0;
+  }, null, { timeout: 20000 });
+
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
   const dir = await page.evaluate(() => {
     const a = window.__opticon, g = a.game, m = g.map, p = g.prisoners[0];

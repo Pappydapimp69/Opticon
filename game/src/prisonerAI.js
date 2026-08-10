@@ -336,7 +336,14 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   // set, no danger-based early stop, no quiet-discipline pausing. This
   // guarantees the turn makes real progress (or ends the game trying), so a
   // stalemate can never persist indefinitely.
-  const committed = p.stalledTurns >= STALL_LIMIT;
+  // Two reasons to stop paying for safety. The anti-stall commit is one; the
+  // other is that safety is currently FREE — a prisoner just out of custody
+  // cannot be taken by the gaze at all for a turn or two (RELEASE_GRACE_TURNS),
+  // so routing around lit, watched ground during that window buys nothing and
+  // spends the only turns where the open ground is actually crossable. An AI
+  // that kept creeping through its own reprieve would be modelling a threat
+  // that is switched off.
+  const committed = p.stalledTurns >= STALL_LIMIT || p.graceTurns > 0;
 
   // Rolled once per turn, not per tile: a fooled prisoner stays fooled for
   // the whole turn rather than re-guessing at every step.

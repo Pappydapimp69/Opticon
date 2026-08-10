@@ -17,6 +17,8 @@ export class UI {
       mpStat: document.getElementById("mpStat"),
       custody: document.getElementById("custodyLabel"),
       custodyStat: document.getElementById("custodyStat"),
+      grace: document.getElementById("graceLabel"),
+      graceStat: document.getElementById("graceStat"),
       gazeStat: document.getElementById("gazeStat"),
       round: document.getElementById("roundLabel"),
       view: document.getElementById("viewLabel"),
@@ -96,6 +98,14 @@ export class UI {
     if (this.el.custodyStat) this.el.custodyStat.classList.toggle("hidden", !held);
     if (this.el.custody && held) {
       this.el.custody.textContent = `${p.custody} turn${p.custody === 1 ? "" : "s"}`;
+    }
+    // Just out of a cell: the eye cannot take them for this many more of their
+    // own turns. Never shown at the same time as Held — you are in one state
+    // or the other — so the rail never grows a slot.
+    const loose = !humanIsWatcher && !held && p.graceTurns > 0;
+    if (this.el.graceStat) this.el.graceStat.classList.toggle("hidden", !loose);
+    if (this.el.grace && loose) {
+      this.el.grace.textContent = `${p.graceTurns} turn${p.graceTurns === 1 ? "" : "s"}`;
     }
     // Show the cap, and warn once it's genuinely close — a limit nobody can
     // see isn't pressure, it's an ambush.

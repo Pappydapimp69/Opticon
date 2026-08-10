@@ -438,6 +438,9 @@ html, body {
    different provisional states, two different colours: one is "I have not
    spent this yet", the other is "this is true, and only for now". */
 .stat .val.staged { color: #ffc75a; }
+/* Post-release grace: escape-green, the same colour as the gate, because it
+   is the window in which crossing open ground is actually free. */
+.stat .val.safe { color: #59f7a6; text-shadow: 0 0 8px rgba(89, 247, 166, .35); }
 .stat .val.revealed { color: #ffd76a; text-shadow: 0 0 10px rgba(255,215,106,0.5); }
 
 /* ---- Zone (which quadrant the human prisoner is in) ---------------------
