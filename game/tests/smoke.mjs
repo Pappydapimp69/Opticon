@@ -71,6 +71,7 @@ const scenario = process.argv[2] || "prisoner";
   // Start a game: difficulty -> play type (selects only, moves focus to
   // Start) -> hold the Start button.
   const startBtn = scenario === "watcher" ? "#playWatcher" : scenario === "hotseat" ? "#playHotseat" : "#playPrisoner";
+  await page.waitForSelector('[data-diff="medium"]', { state: "visible", timeout: 20000 });
   await page.click('[data-diff="medium"]');
   await page.waitForTimeout(200);
   await page.click(startBtn);
@@ -81,6 +82,29 @@ const scenario = process.argv[2] || "prisoner";
   await page.mouse.up();
   await page.waitForTimeout(400);
   await page.evaluate(() => window.__opticon.renderer.skipIntro());
+  // Wait for the HUMAN to actually hold the turn before driving anything. The
+  // game opens on an AI companion in Prisoner mode and the AI runs on a timer,
+  // so pressing keys immediately raced it — the same race that made wincheck
+  // fail one run in three. Here it was worse than flaky: nothing below
+  // asserted the keys did anything, so losing the race was silent.
+  await page.waitForFunction(() => {
+    const a = window.__opticon;
+    if (!a || !a.game) return false;
+    if (a.aiThinking) return false;
+    return a.game.turn === "Prisoner"
+      ? a.game.activePrisoner === 0
+      : true;
+  }, null, { timeout: 20000 }).catch(() => {});
+
+  // What the drive below is supposed to change. Captured BEFORE the keys so
+  // the assertions at the end can tell "played a few turns" apart from "sat
+  // there while every keypress was ignored" — which this test could not
+  // distinguish for its entire existence.
+  const before = await page.evaluate(() => {
+    const g = window.__opticon.game;
+    const p = g.prisoners[0];
+    return { x: p.x, y: p.y, mp: p.mp, round: g.round, facing: g.watcher.facing, view: window.__opticon.viewMode };
+  });
 
   // Capture an early gameplay screenshot (before heavy play) for visual review.
   const shotPlay = path.join(ROOT, "tests", `play-${scenario}.png`);
@@ -114,11 +138,21 @@ const scenario = process.argv[2] || "prisoner";
     };
   });
 
+  // Did the drive actually drive anything? Each scenario has its own tell:
+  // a Prisoner spends move points or moves, a Watcher's turn cycle advances
+  // the round, and every scenario ends on KeyV/the view toggle.
+  const moved = scenario === "watcher"
+    ? state.round > before.round || state.facing !== before.facing
+    : state.prisoner.x !== before.x || state.prisoner.y !== before.y ||
+      state.prisoner.mp !== before.mp || state.round > before.round;
+  const viewChanged = scenario === "watcher" ? true : state.viewMode !== before.view;
+
   const shot = path.join(ROOT, "tests", `shot-${scenario}.png`);
   await page.screenshot({ path: shot });
 
   console.log("BUILD:", build);
   console.log("STATE:", JSON.stringify(state, null, 2));
+  console.log("DROVE:", moved ? "yes" : "NO — every keypress was ignored", `(view ${before.view} -> ${state.viewMode})`);
   console.log("ERRORS:", errors.length);
   errors.slice(0, 20).forEach((e) => console.log("  •", e));
   if (process.env.VERBOSE) logs.forEach((l) => console.log("  ", l));
@@ -126,7 +160,10 @@ const scenario = process.argv[2] || "prisoner";
 
   await browser.close();
   server.close();
-  process.exit(errors.length === 0 && state.ok ? 0 : 1);
+  const pass = errors.length === 0 && state.ok && moved && viewChanged;
+  if (!pass && state.ok && !moved) console.log("  • the scenario's keypresses changed nothing");
+  if (!pass && state.ok && !viewChanged) console.log("  • the view toggle did nothing");
+  process.exit(pass ? 0 : 1);
 })().catch((e) => {
   console.error("SMOKE FAILED:", e);
   process.exit(1);

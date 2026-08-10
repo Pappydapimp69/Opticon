@@ -117,15 +117,20 @@ function trap(obj, key, log, label) {
   check(p.gazeBelief.length === 4 && p.gazeBelief.every((v) => v === 0.25),
     "a prisoner starts with a flat guess about the gaze");
 
-  // A public claim moves it; the truth does not.
+  // A public claim moves it; the truth does not. Measured on MEDIUM, which is
+  // the softest tier whose belief can actually reach behaviour — easy's
+  // trustClaim is 0 by construction (see T29 and the comment on
+  // PRISONER_SKILL.easy: riskAversion 0 and caution 1.01 both sever belief
+  // from routing there, so a non-zero trust was dead configuration that read
+  // as intent).
   const rng = mulberry(5);
   g.watcher.facing = 2;
   g.watcher.lastBluff = 0;
-  prisonerAITurn(g, rng, "easy"); // easy trusts claims most
+  prisonerAITurn(g, rng, "medium");
   const believesClaim = p.gazeBelief[0];
   const believesTruth = p.gazeBelief[2];
   check(believesClaim > believesTruth,
-    `an easy prisoner is moved by the CLAIM, not the truth (claim ${believesClaim.toFixed(2)} vs true ${believesTruth.toFixed(2)})`);
+    `a medium prisoner is moved by the CLAIM, not the truth (claim ${believesClaim.toFixed(2)} vs true ${believesTruth.toFixed(2)})`);
   check(Math.abs(p.gazeBelief.reduce((a, b) => a + b, 0) - 1) < 1e-9, "the belief stays a distribution");
 
   // A hard prisoner ignores talk entirely.
@@ -137,30 +142,40 @@ function trap(obj, key, log, label) {
   check(hardSpread < 1e-9, `a hard prisoner is not moved by a claim at all (spread ${hardSpread.toFixed(3)})`);
 }
 
-// ---- 5. A bluff must be able to change behaviour on EVERY tier ------------
-// The old `gullible: 0` on hard meant a human Watcher's bluff could not
-// possibly affect a hard prisoner. Belief-based, a claim is always evidence.
+// ---- 5. A claim that moves a NUMBER is not a claim that moves a PRISONER ---
+// This section used to accept `positionDiffers || beliefDiffers` as proof that
+// "bluffing reaches" a tier. That OR is the whole trap: a belief value can
+// move while being structurally unable to reach behaviour, and the assertion
+// still goes green. On easy it was doing exactly that — measured across 120
+// full games, trustClaim 0 and trustClaim 1.2 produced byte-identical results
+// (0/120 differed), because easy's riskAversion 0 short-circuits the route
+// pricing and its caution of 1.01 can never be met by a distribution summing
+// to 1. Belief and behaviour are counted separately now, and the claim that a
+// bluff REACHES a tier is asserted against behaviour.
 {
-  const claimEffect = {};
+  const belief = {}, behaviour = {};
   for (const tier of ["easy", "medium", "hard"]) {
-    let moved = 0;
+    let b = 0, moved = 0;
     for (let i = 0; i < 30; i++) {
       const seed = (i * 7919) >>> 0 || 11;
-      const a = freshGame(seed); const b = freshGame(seed);
+      const a = freshGame(seed); const c = freshGame(seed);
       a.watcher.lastBluff = null;
-      b.watcher.lastBluff = (a.watcher.facing + 2) % 4; // claim the opposite
+      c.watcher.lastBluff = (a.watcher.facing + 2) % 4; // claim the opposite
       prisonerAITurn(a, mulberry(i), tier);
-      prisonerAITurn(b, mulberry(i), tier);
-      const pa = a.prisoners[0], pb = b.prisoners[0];
-      if (pa.x !== pb.x || pa.y !== pb.y ||
-          pa.gazeBelief.some((v, k) => Math.abs(v - pb.gazeBelief[k]) > 1e-9)) moved++;
+      prisonerAITurn(c, mulberry(i), tier);
+      const pa = a.prisoners[0], pc = c.prisoners[0];
+      if (pa.gazeBelief.some((v, k) => Math.abs(v - pc.gazeBelief[k]) > 1e-9)) b++;
+      if (pa.x !== pc.x || pa.y !== pc.y) moved++;
     }
-    claimEffect[tier] = moved;
+    belief[tier] = b;
+    behaviour[tier] = moved;
   }
-  console.log(`    a claim changed belief/behaviour in: ${JSON.stringify(claimEffect)} of 30 games per tier`);
-  check(claimEffect.easy > 0 && claimEffect.medium > 0,
-    "bluffing reaches easy and medium prisoners");
-  check(claimEffect.hard === 0,
+  console.log(`    a claim moved the BELIEF in:    ${JSON.stringify(belief)} of 30 turns per tier`);
+  console.log(`    a claim moved the PRISONER in:  ${JSON.stringify(behaviour)} of 30 turns per tier`);
+  check(behaviour.medium > 0, "a bluff actually moves a medium prisoner, not just their belief");
+  check(belief.easy === 0 && behaviour.easy === 0,
+    "easy is honestly inert: no belief shift, no behaviour shift (T29)");
+  check(belief.hard === 0,
     "a hard prisoner is deliberately immune to talk (trustClaim 0) — skill, not gullibility");
 }
 
