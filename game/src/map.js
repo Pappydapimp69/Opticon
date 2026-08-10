@@ -40,6 +40,14 @@ export const ITEM_KINDS = Object.freeze({
   // Prisoner is where the eye is actually pointed — bluffs exist precisely to
   // poison that guess. The feather answers it, once.
   FEATHER: "feather",
+  // ---- Custody items ----
+  // Being seized gives you three turns and, bare-handed, poor odds. These are
+  // the three ways to spend an inventory slot on insurance instead of tempo:
+  // get out NOW, buy more time, or take the guard off you. Each answers a
+  // different reason you are still in that cell.
+  SHIM: "shim", // held only: slip the cuffs immediately, guard or no guard
+  TRANSFER: "transfer", // held only: forged papers reset the processing clock
+  FLARE: "flare", // any time: drag a quadrant's guards to a burning tile
 });
 
 // `blurb` says what the item DOES, `use` says how to fire it. Both are part of
@@ -54,29 +62,55 @@ export const ITEM_KINDS = Object.freeze({
 // — the step players were silently missing.
 export const ITEM_INFO = Object.freeze({
   [ITEM_KINDS.DISTRACT]: {
+    weight: 3,
     label: "Distraction", icon: "🔔", requires: null, targeted: true,
     blurb: "Throws a fake noise for the Watcher to chase, somewhere that isn't you.",
     use: "pick the direction to throw it",
   },
   [ITEM_KINDS.MUFFLE]: {
+    weight: 3,
     label: "Muffle", icon: "🧣", requires: null, targeted: false,
     blurb: "Silences this turn's movement, so you can run the full 3 tiles and leave nothing behind.",
     use: "spends the moment you press it",
   },
   [ITEM_KINDS.LOCKPICK]: {
+    weight: 3,
     label: "Lockpick", icon: "🗝️", requires: OBJ.DOOR, targeted: true,
     blurb: "Opens a door next to you for free, instead of spending your move on it.",
     use: "pick the direction of the door",
   },
   [ITEM_KINDS.CUTTERS]: {
+    weight: 3,
     label: "Cutters", icon: "✂️", requires: OBJ.SWITCH, targeted: true,
     blurb: "Kills a whole bank of lights for good. The gaze cannot capture you on a dark tile.",
     use: "stand next to a light switch and pick its direction",
   },
   [ITEM_KINDS.FEATHER]: {
+    weight: 1,
     label: "Golden Feather", icon: "🪶", requires: null, targeted: false,
     blurb: "Shows the eye's true facing for one round, so your Gaze readout stops saying \"?\".",
     use: "spends the moment you press it",
+  },
+  // `heldOnly` items are dead weight until you are caught — that is the trade.
+  // They are marked so the HUD can grey them out and say why, rather than
+  // letting a player burn a turn discovering it.
+  [ITEM_KINDS.SHIM]: {
+    weight: 2,
+    label: "Shim", icon: "🧷", requires: null, targeted: false, heldOnly: true,
+    blurb: "Slips the cuffs. Walks you out of custody at once, even with a guard standing over you.",
+    use: "spends the moment you press it",
+  },
+  [ITEM_KINDS.TRANSFER]: {
+    weight: 2,
+    label: "Forged Transfer", icon: "📋", requires: null, targeted: false, heldOnly: true,
+    blurb: "The tower's own paperwork says you belong elsewhere. Resets your processing clock to full.",
+    use: "spends the moment you press it",
+  },
+  [ITEM_KINDS.FLARE]: {
+    weight: 2,
+    label: "Flare", icon: "🔥", requires: null, targeted: true,
+    blurb: "Burns bright enough to pull every guard in that quadrant toward it and cost them their next move.",
+    use: "pick the direction to throw it",
   },
 });
 
@@ -314,9 +348,25 @@ function placeItems(tiles, objects, ring, size, rng, cfg) {
     return req == null || present.has(req);
   });
   if (!pool.length) return [];
+  // Weighted, not uniform. A flat pool meant every new item kind quietly made
+  // the Golden Feather rarer — it was 1-in-5 when it was written and would be
+  // 1-in-8 now — and it would have scattered custody insurance as often as the
+  // tools you use every turn. Weight makes the rate a decision instead of a
+  // side effect of how many kinds happen to exist.
+  const totalWeight = pool.reduce((a, k) => a + (ITEM_INFO[k].weight ?? 1), 0);
+  const pick = (r) => {
+    let t = r * totalWeight;
+    for (const k of pool) {
+      t -= ITEM_INFO[k].weight ?? 1;
+      if (t < 0) return k;
+    }
+    return pool[pool.length - 1];
+  };
 
   const items = [];
-  const want = cfg.itemCount == null ? 5 : cfg.itemCount;
+  // Raised from 5 alongside the custody kit: the same count spread over eight
+  // kinds instead of five would have left most maps with no way out of a cell.
+  const want = cfg.itemCount == null ? 7 : cfg.itemCount;
   let guard = size * size;
   while (items.length < want && guard-- > 0) {
     const x = 1 + Math.floor(rng() * (size - 2));
@@ -325,7 +375,7 @@ function placeItems(tiles, objects, ring, size, rng, cfg) {
     if (objects[y][x] !== OBJ.NONE) continue;
     if (ring[y][x] === 0) continue;
     if (items.some((it) => Math.max(Math.abs(it.x - x), Math.abs(it.y - y)) <= 2)) continue;
-    const kind = pool[Math.floor(rng() * pool.length) % pool.length];
+    const kind = pick(rng());
     objects[y][x] = OBJ.ITEM;
     items.push({ x, y, kind });
   }

@@ -33,6 +33,7 @@ import {
   moveGuards,
   GUARD_SIGHT_RANGE,
   GUARD_ACTION_POINTS,
+  CUSTODY_TURNS,
   GUARD_CAPTURE_COST,
   quadrantOf,
   addNoise,
@@ -200,8 +201,19 @@ section("capture logic");
   g.round = 2; // past the first-round grace window
   g.watcher.facing = 0;
   const scan = watcherScan(g);
-  ok(scan.caught && !p.alive, "exposed prisoner in wedge is captured");
-  ok(g.status === "captured" && g.winner === "Watcher", "capture ends game for Watcher");
+  // Capture is now SEIZURE, not deletion: the prisoner is held on the tile
+  // they were taken on, still alive, with a processing clock running. The
+  // game therefore does NOT end here — it ends if that clock reaches zero.
+  ok(scan.caught && p.alive && p.custody === CUSTODY_TURNS,
+    `exposed prisoner in wedge is seized (custody ${p.custody})`);
+  ok(g.status === "playing", "a seizure does not end the game — the clock has to run out first");
+  // Run the clock down with nothing to spend and no rescuer.
+  for (let i = 0; i < CUSTODY_TURNS; i++) {
+    g.turn = "Prisoner";
+    endPrisonerTurn(g);
+  }
+  ok(!p.alive, "an unanswered custody clock does kill");
+  ok(g.status === "captured" && g.winner === "Watcher", "and THAT ends the game for the Watcher");
 }
 
 // --- Tiered capture-exposure by difficulty (resolves OPT-1) ---------------
@@ -972,21 +984,24 @@ section("dispatched guards are pawns: one square of sight, paid for in action po
     return g;
   };
 
+  // Capture means SEIZED into custody now, so "was there a capture" is
+  // `custody`, not `!alive` — asserting on `alive` alone would pass for every
+  // one of these cases and test nothing.
   let g = withGuard(cx - 3, y);
   moveGuards(g);
-  ok(g.prisoners[0].alive, "three squares away cannot capture, clear line or not");
+  ok(!g.prisoners[0].custody, "three squares away cannot capture, clear line or not");
 
   g = withGuard(cx - 2, y);
   moveGuards(g);
-  ok(g.prisoners[0].alive, "two squares away cannot capture");
+  ok(!g.prisoners[0].custody, "two squares away cannot capture");
 
   g = withGuard(cx - 1, y);
   moveGuards(g);
-  ok(!g.prisoners[0].alive, "an adjacent guard captures");
+  ok(g.prisoners[0].custody === CUSTODY_TURNS, "an adjacent guard captures");
 
   g = withGuard(cx - 1, y - 1);
   moveGuards(g);
-  ok(!g.prisoners[0].alive, "sight is one square in EVERY direction — diagonals count");
+  ok(g.prisoners[0].custody === CUSTODY_TURNS, "sight is one square in EVERY direction — diagonals count");
 
   g = withGuard(cx - 1, y);
   moveGuards(g);
@@ -995,7 +1010,7 @@ section("dispatched guards are pawns: one square of sight, paid for in action po
 
   g = withGuard(cx - 1, y, GUARD_CAPTURE_COST - 1);
   moveGuards(g);
-  ok(g.prisoners[0].alive, "a guard that cannot afford the grab does not make it");
+  ok(!g.prisoners[0].custody, "a guard that cannot afford the grab does not make it");
 }
 
 section("a decoy thrown after your own footsteps still pulls the guards");

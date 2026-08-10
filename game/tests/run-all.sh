@@ -26,6 +26,12 @@ echo
 echo "== own escape (your win is YOUR escape, not a companion's) =="
 node tests/own-escape.mjs
 echo
+echo "== screen-relative movement (up is the top of the screen, not North) =="
+node tests/screen-relative-move.mjs
+echo
+echo "== custody (3 turns to get out of a cell; items, a friend, or luck) =="
+node tests/custody.mjs
+echo
 echo "== zone hud (quadrant readout + watcher position-leak gate) =="
 node tests/zone-hud.mjs
 echo

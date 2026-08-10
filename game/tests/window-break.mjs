@@ -110,7 +110,15 @@ function check(cond, label) {
     console.log("  (no window found on this seed — skipping remaining checks, not a failure of the feature itself)");
   } else {
     const w1 = setup.found[0];
-    const keyByDir = ["KeyW", "KeyD", "KeyS", "KeyA"];
+    // Screen-relative, so ask the renderer which key currently points at a
+    // given world cardinal rather than assuming W==North.
+    const keyFor = (worldDir, from) => page.evaluate(([d, from]) => {
+      const app = window.__opticon;
+      for (let sd = 0; sd < 4; sd++) {
+        if (app.renderer.screenDirToWorld(sd, from) === d) return ["KeyW", "KeyD", "KeyS", "KeyA"][sd];
+      }
+      return "KeyW";
+    }, [worldDir, from]);
 
     // --- Keyboard: Shift+direction breaks it.
     await page.evaluate((c) => {
@@ -120,7 +128,7 @@ function check(cond, label) {
     }, w1);
     await page.waitForTimeout(100);
     await page.keyboard.down("ShiftLeft");
-    await page.keyboard.press(keyByDir[w1.dir]);
+    await page.keyboard.press(await keyFor(w1.dir, { x: w1.fx, y: w1.fy }));
     await page.keyboard.up("ShiftLeft");
     await page.waitForTimeout(150);
     let broken = await page.evaluate((c) => {

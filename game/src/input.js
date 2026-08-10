@@ -121,6 +121,11 @@ export class Input {
       Digit8: () => this.onIntent("skill", "lock"),
       Digit9: () => this.onIntent("skill", "dispatch"),
       Tab: () => this.onIntent("cycleView"), KeyV: () => this.onIntent("cycleView"),
+      // Fight the cuffs. Only meaningful in custody, and ignored otherwise —
+      // its own key rather than an overload of Space, because ending your turn
+      // and spending your turn trying to get out are different decisions and
+      // you only get three of them.
+      KeyF: () => this.onIntent("struggle"),
       KeyR: () => this.onIntent("restart"),
     };
     if (map[e.code]) {
@@ -279,6 +284,9 @@ export class Input {
     if (edge(3)) this.onIntent("bluff", 0);   // Y (kept for muscle memory)
     if (edge(1)) this.onIntent("bluff", 1);   // B (kept for muscle memory)
     if (edge(2)) this.onIntent("bluff", 3);   // X (kept for muscle memory)
+    // X doubles as Struggle on the Prisoner's turn — the one-role-per-turn
+    // split in main.js means the bluff above and this never both land.
+    if (edge(2)) this.onIntent("struggle");
     if (edge(9)) this.onIntent("cycleView");  // Start
     // Items + skills had NO gamepad route at all — they were keyboard
     // (1-8) and touch-chip only, so a pad player simply could not use half

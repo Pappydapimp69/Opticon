@@ -41,6 +41,12 @@ const ITEM_LOOK = {
   lockpick: { color: 0x7fd1ff, geo: () => new THREE.ConeGeometry(0.16, 0.42, 4) },      // key spike
   cutters:  { color: 0xff8b6b, geo: () => new THREE.OctahedronGeometry(0.22) },         // blades
   feather:  { color: 0xffd76a, geo: () => new THREE.CylinderGeometry(0.02, 0.12, 0.5, 6) }, // quill
+  // Custody kit. Deliberately cool/pale against the warm tools above, so a
+  // glance across the floor separates "something to use now" from "insurance
+  // for the worst case" without reading a single label.
+  shim:     { color: 0xb9c6e4, geo: () => new THREE.TorusKnotGeometry(0.12, 0.035, 48, 6) }, // twisted pin
+  transfer: { color: 0xe8e2c8, geo: () => new THREE.BoxGeometry(0.30, 0.02, 0.22) },         // sheet of paper
+  flare:    { color: 0xff5a2b, geo: () => new THREE.CylinderGeometry(0.07, 0.07, 0.42, 8) }, // stick
   _default: { color: 0xffc75a, geo: () => new THREE.OctahedronGeometry(0.22) },
 };
 
@@ -132,7 +138,13 @@ export class Renderer {
   // transform that put the map on screen in the first place, so it stays
   // correct for any camera pose without a separate handedness/sign
   // convention to get wrong (and to silently invert).
-  screenDirToWorld(screenDir) {
+  // `originTile` is the map tile the direction is being given FROM, defaulting
+  // to the map centre. It matters under a perspective camera: the on-screen
+  // direction of world-North is not the same at the top of the map as at the
+  // bottom, so a prisoner near the edge resolving their own move against the
+  // tower's tile can pick the neighbouring cardinal. The Watcher's controls
+  // genuinely act from the tower, so they keep the default.
+  screenDirToWorld(screenDir, originTile = null) {
     const want = [
       { x: 0, y: 1 },  // up    (NDC y is +up)
       { x: 1, y: 0 },  // right
@@ -141,7 +153,8 @@ export class Renderer {
     ][screenDir];
     if (!want || !this.camera) return screenDir;
     this.camera.updateMatrixWorld();
-    const originV = new THREE.Vector3(this.worldX(this.center.x), 0, this.worldZ(this.center.y));
+    const from = originTile || this.center;
+    const originV = new THREE.Vector3(this.worldX(from.x), 0, this.worldZ(from.y));
     const origin = originV.clone().project(this.camera);
     let best = screenDir;
     let bestDot = -Infinity;
@@ -414,9 +427,25 @@ export class Renderer {
       const pLight = new THREE.PointLight(COLORS.prisoner, 0.5, 4, 2);
       pLight.position.y = 0.7;
       group.add(pLight);
+      // A cage that only appears while this prisoner is in custody. Read from
+      // across the map at overview zoom, which the halo colour alone is not —
+      // and being able to SEE which teammate is held is what makes walking
+      // over to free them a decision rather than a log line.
+      const cage = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.42, 0.42, 1.0, 10, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: COLORS.guard, wireframe: true, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+        })
+      );
+      cage.position.y = 0.5;
+      cage.visible = false;
+      group.add(cage);
       return {
         group,
         halo,
+        cage,
+        body,
+        pLight,
         // When a committed move covers multiple tiles, the avatar visibly
         // steps through each one in order (with fired arrival events)
         // instead of sliding straight from the old tile to the final one.
@@ -714,8 +743,23 @@ export class Renderer {
         av.group.position.z += (targetAZ - av.group.position.z) * k;
       }
       av.group.visible = showPrisoner && pr.alive && !pr.escaped;
+      // Custody: caged, drained of the prisoner's own colour, and spinning
+      // slowly so it reads as a live countdown rather than a dead marker.
+      const held = pr.custody > 0;
+      if (av.cage) {
+        av.cage.visible = held;
+        if (held) av.cage.rotation.y = this.time * 0.8;
+      }
+      if (av.body) {
+        av.body.material.color.setHex(held ? COLORS.guard : COLORS.prisoner);
+        av.body.material.emissive.setHex(held ? 0x3a1200 : 0x0a3a44);
+      }
+      if (av.pLight) av.pLight.color.setHex(held ? COLORS.guard : COLORS.prisoner);
+      av.halo.material.color.setHex(held ? COLORS.guard : COLORS.prisoner);
       // Pulse halo, phase-offset per prisoner so a group doesn't pulse in lockstep.
-      av.halo.material.opacity = 0.4 + 0.2 * Math.sin(this.time * 4 + i * 0.7);
+      av.halo.material.opacity = held
+        ? 0.55 + 0.35 * Math.sin(this.time * 6)
+        : 0.4 + 0.2 * Math.sin(this.time * 4 + i * 0.7);
     }
 
     // Eye faces watcher facing; color shifts if it just scanned.
