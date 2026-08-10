@@ -92,7 +92,7 @@ async function finishAs(page, winner) {
     // `["ArrowUp","ArrowRight",...][worldDir]` and walk somewhere that was not
     // the gate. Ask the game's own resolver which screen direction currently
     // lands on the world direction we need.
-    const dir = await page.evaluate(() => {
+    const worldDir = await page.evaluate(() => {
       const app = window.__opticon;
       const g = app.game;
       const p = g.prisoners[0];
@@ -102,14 +102,28 @@ async function finishAs(page, winner) {
         const sx = e.x - D[d][0], sy = e.y - D[d][1];
         if (sx < 0 || sy < 0 || sx >= g.map.size || sy >= g.map.size) continue;
         p.x = sx; p.y = sy; p.mp = p.mpMax || 3;
-        for (let sd = 0; sd < 4; sd++) {
-          if (app.renderer.screenDirToWorld(sd, { x: sx, y: sy }) === d) return sd;
-        }
-        return -1;
+        return d; // WORLD direction; the screen key is resolved after the camera settles
       }
       return -1;
     });
-    await page.keyboard.press(["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"][dir]);
+    // Same camera-settle the wincheck harness needs: the teleport above moves
+    // the prisoner across the map, and until the rig eases onto its new target
+    // `screenDirToWorld` is projecting the new tile through a camera still
+    // framing the old one, which can resolve a direction to the wrong key.
+    // This test happened to pass without it; that was luck, not correctness.
+    await page.evaluate(() => {
+      const a = window.__opticon;
+      for (let i = 0; i < 240; i++) a.renderer.updateCamera(a.game, a.game.prisoners[0], 0.1);
+    });
+    const sd = await page.evaluate((d) => {
+      const app = window.__opticon;
+      const p = app.game.prisoners[0];
+      for (let s = 0; s < 4; s++) {
+        if (app.renderer.screenDirToWorld(s, { x: p.x, y: p.y }) === d) return s;
+      }
+      return -1;
+    }, worldDir);
+    await page.keyboard.press(["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft"][sd >= 0 ? sd : worldDir]);
     await page.waitForTimeout(120);
     await page.keyboard.press("Space"); // commit the move onto the gate
   } else {

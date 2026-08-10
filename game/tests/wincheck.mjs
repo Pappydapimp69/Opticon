@@ -44,25 +44,74 @@ const server = http.createServer((req, res) => {
   }, null, { timeout: 20000 });
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
-  const dir = await page.evaluate(() => {
-    const a = window.__opticon, g = a.game, m = g.map, p = g.prisoners[0];
-    const ex = m.exit;
-    // find a walkable neighbor of exit
-    const N = [[0,-1,2],[1,0,3],[0,1,0],[-1,0,1]]; // dx,dy,dirToStepFromNeighborIntoExit
-    for (const [dx,dy,backDir] of N) {
-      const nx = ex.x - dx, ny = ex.y - dy;
-      if (m.tiles[ny] && m.tiles[ny][nx] === 0) {
-        p.x = nx; p.y = ny; p.startTurnPos = {x:nx,y:ny}; p.mp = 3; g.turn = "Prisoner";
-        // direction from neighbor into exit:
-        if (dx===0&&dy===-1) return 0; if (dx===1&&dy===0) return 1; if (dx===0&&dy===1) return 2; if (dx===-1&&dy===0) return 3;
-      }
+  //
+  // The neighbour search used to require `tiles[ny][nx] === TILE.FLOOR`. The
+  // exit sits on the map edge, so two of its four neighbours are outer wall,
+  // and on a fair share of seeds the remaining ones carry a door or another
+  // object rather than plain floor. On those seeds the loop fell through,
+  // returned -1, the test pressed nothing at all — and then reported "escape
+  // verification failed", which reads as a broken escape rather than a setup
+  // that never happened. That is why this was flaky at ~1 run in 4 (the game
+  // picks a fresh random seed every start), and why the first fix for the
+  // flake — waiting for the human to hold the turn, a real and separate bug —
+  // did not clear it.
+  //
+  // Now: accept any non-WALL, non-MOAT neighbour, and if a seed genuinely has
+  // none, restart into a new seed and try again rather than reporting a
+  // failure the feature did not cause.
+  const TILE_WALL = 1, TILE_MOAT = 2;
+  let dir = -1;
+  for (let attempt = 0; attempt < 8 && dir < 0; attempt++) {
+    if (attempt > 0) {
+      await page.click("#btnRestart").catch(() => {});
+      await page.waitForTimeout(500);
+      await page.evaluate(() => window.__opticon.renderer.skipIntro());
+      await page.waitForFunction(() => {
+        const a = window.__opticon;
+        return a && a.game && !a.aiThinking && a.game.turn === "Prisoner" && a.game.activePrisoner === 0;
+      }, null, { timeout: 20000 }).catch(() => {});
     }
-    return -1;
-  });
+    dir = await page.evaluate(([WALL, MOAT]) => {
+      const a = window.__opticon, g = a.game, m = g.map, p = g.prisoners[0];
+      const ex = m.exit;
+      const N = [[0, -1, 0], [1, 0, 1], [0, 1, 2], [-1, 0, 3]];
+      for (const [dx, dy, stepDir] of N) {
+        const nx = ex.x - dx, ny = ex.y - dy;
+        if (!m.tiles[ny] || m.tiles[ny][nx] === undefined) continue;
+        const t = m.tiles[ny][nx];
+        if (t === WALL || t === MOAT) continue;
+        p.x = nx; p.y = ny; p.startTurnPos = { x: nx, y: ny }; p.mp = 3;
+        p.custody = 0; p.alive = true; p.escaped = false;
+        g.turn = "Prisoner"; g.activePrisoner = 0;
+        return stepDir; // direction to step FROM the neighbour INTO the exit
+      }
+      return -1;
+    }, [TILE_WALL, TILE_MOAT]);
+  }
+  if (dir < 0) {
+    console.log("SETUP FAILED: no reachable neighbour of the exit after 8 seeds — not a feature failure");
+    await browser.close(); server.close();
+    process.exit(2);
+  }
+
   // Movement keys are SCREEN directions (the camera orbits), so the key for a
   // given world cardinal has to be looked up, not assumed. This happened to
   // pass with a fixed table only because the default camera makes up==North.
-  const key = dir < 0 ? null : await page.evaluate((d) => {
+  // Let the camera actually arrive before asking which key points where.
+  // The teleport above moves the prisoner ~30 tiles; the camera rig eases
+  // toward its target over several frames, so for a moment `screenDirToWorld`
+  // is being asked to project the prisoner's NEW tile through a camera still
+  // framing the OLD one. Under perspective that far off-centre it returns a
+  // different cardinal — which is how "step West into the exit" became a
+  // keypress that walked South, and the whole reason this test still failed
+  // after two other genuine fixes. Real play never hits it (the avatar moves a
+  // tile at a time and the camera is never more than a tile behind); a
+  // teleporting harness does.
+  await page.evaluate(() => {
+    const a = window.__opticon;
+    for (let i = 0; i < 240; i++) a.renderer.updateCamera(a.game, a.game.prisoners[0], 0.1);
+  });
+  const key = await page.evaluate((d) => {
     const app = window.__opticon;
     const p = app.game.prisoners[0];
     for (let sd = 0; sd < 4; sd++) {
@@ -72,11 +121,15 @@ const server = http.createServer((req, res) => {
     }
     return null;
   }, dir);
-  if (dir >= 0 && key) {
-    await page.keyboard.press(key); // stage the move (hypothetical, not yet real)
-    await page.waitForTimeout(200);
-    await page.keyboard.press("Space"); // commit — actually steps onto the exit
+  if (!key) {
+    console.log("SETUP FAILED: no screen direction resolves to the world direction needed");
+    await browser.close(); server.close();
+    process.exit(2);
   }
+  await page.keyboard.press(key); // stage the move (hypothetical, not yet real)
+  await page.waitForTimeout(200);
+  await page.keyboard.press("Space"); // commit — actually steps onto the exit
+
   // Poll for the overlay rather than sleeping a guessed duration — headless
   // rAF can be throttled (sparse frames), and the walk-animation + deferred
   // game-over take longer in wall-clock terms there than on a real, visible

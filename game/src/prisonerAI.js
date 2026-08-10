@@ -174,7 +174,23 @@ export const PRISONER_SKILL = Object.freeze({
   //   below a threshold and buying nothing. 0 = walks straight through.
   // caution — still a THRESHOLD, but only for the genuinely binary calls:
   //   hold position rather than step onto that tile, throw a decoy now.
-  easy:   { caution: 1.01, dawdle: 0.6, useItems: false, riskAversion: 0,  trustClaim: 0.9, trustEvidence: 0.3 },
+  // easy's trustClaim was 0.9 — the HIGHEST of the three, deliberately, so
+  // that "an easy prisoner walks into bluffs". It was dead configuration.
+  // Belief only reaches behaviour through two gates and easy fails both:
+  // `riskAversion: 0` means the route is never priced by belief at all
+  // (`!tune.riskAversion` short-circuits it), and `caution: 1.01` as a
+  // THRESHOLD can never be met, since a belief distribution sums to 1. Proven
+  // rather than reasoned: across 120 seeds, trustClaim 0 and trustClaim 1.2
+  // produced byte-identical games — 0/120 differed.
+  //
+  // Connecting it was measured and rejected. Giving easy riskAversion 2-6 and
+  // caution 0.7 does make the lever live (+2 to +3pt), but ANY avoidance —
+  // even avoidance pointed the wrong way — beats none, so the human Watcher's
+  // capture rate against easy prey fell 65% -> 52-56%. That trades 9-13pt of
+  // tier separation for a 2-3pt lever, which is the wrong way round.
+  //
+  // Set to 0 because that is what it already does. See T29.
+  easy:   { caution: 1.01, dawdle: 0.6, useItems: false, riskAversion: 0,  trustClaim: 0, trustEvidence: 0.3 },
   medium: { caution: 0.55, dawdle: 0.4, useItems: true,  riskAversion: 5,  trustClaim: 0.35, trustEvidence: 0.9 },
   hard:   { caution: 0.34, dawdle: 0.0, useItems: true,  riskAversion: 9,  trustClaim: 0.0, trustEvidence: 1.4 },
 });
