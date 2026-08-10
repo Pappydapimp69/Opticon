@@ -31,7 +31,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.50.0";
+const BUILD = "beta-0.51.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -612,6 +612,11 @@ function startGame(overrides = {}) {
     watcherFacing: 0,
     prisoners: map.spawns,
     dispatchTier: dispatchTierFor(),
+    // Prisoner 0 is the human's own body whenever a human holds the Prisoner
+    // seat (see humanControlsPrisoner); in Watcher mode nobody down there is
+    // the player, so there is no personal fate to grade and the rules fall
+    // back to the institutional win condition.
+    humanPrisoner: app.config.humanRole === "Watcher" && app.config.mode !== "hotseat" ? null : 0,
   });
   app.game.prisoners.forEach((p) => (p.mpMax = 3));
   animatingPrisoner = 0;
@@ -695,6 +700,11 @@ function hintFor() {
     return prisoner ? "Watching the Prisoner's turn…" : "Watching the Watcher's turn…";
   }
   if (!prisoner && app.armedSkill) return targetedSkillHint(app.armedSkill, scheme);
+  // An armed item is mid-verb: the player has committed to spending it and the
+  // only thing left to teach is where to point it. Same treatment the Watcher's
+  // targeted skills already got — items were the side that never had it, which
+  // is why arming one felt like nothing happened.
+  if (prisoner && armedItem) return armedItemHint(armedItem, scheme);
   const staged = app.stagedPath.length > 0;
   // Only advertise item controls when something is actually carried —
   // otherwise the hint teaches a verb the player has no way to perform yet.
@@ -984,6 +994,11 @@ function updateZoneHud() {
 // audit problem that bit the 1→N prisoner scale-out (memory E10). The
 // signature guard makes a per-frame call free when nothing changed, so
 // there's no call site left to forget.
+// Item copy is frozen constant data from map.js, not player input — but the
+// caption is the one place that data reaches innerHTML, so escape it anyway
+// rather than depend on nobody ever putting an ampersand in a blurb.
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
 let _itemBarSig = "";
 function updateItemBar() {
   const bar = document.getElementById("itemBar");
@@ -991,12 +1006,14 @@ function updateItemBar() {
   const g = app.game;
   const show = g && g.turn === "Prisoner" && humanControlsPrisoner();
   const p = show ? g.prisoners[g.activePrisoner] : null;
+  const caption = document.getElementById("itemCaption");
   const sig = p ? `${p.items.join(",")}|${armedItem || ""}|${padSlot}` : "";
   if (sig === _itemBarSig) return;
   _itemBarSig = sig;
   if (!p || !p.items.length) {
     bar.innerHTML = "";
     bar.classList.add("empty");
+    if (caption) { caption.textContent = ""; caption.classList.add("empty"); }
     return;
   }
   bar.classList.remove("empty");
@@ -1012,6 +1029,24 @@ function updateItemBar() {
         `<span class="iname">${info.label}</span></button>`;
     })
     .join("");
+  // Describe whichever item the player is about to spend: the armed one if
+  // there is one, else the gamepad-highlighted slot, else the first. Something
+  // is always described, because the failure mode is carrying an icon you were
+  // never told the meaning of — not having too little screen furniture.
+  if (caption) {
+    const focus = armedItem && p.items.includes(armedItem)
+      ? armedItem
+      : p.items[Math.min(Math.max(padSlot, 0), p.items.length - 1)] || p.items[0];
+    const info = ITEM_INFO[focus];
+    const armedNow = armedItem === focus;
+    caption.classList.remove("empty");
+    const next = !info.targeted
+      ? "Spends the moment you press it."
+      : armedNow
+        ? `Armed — now ${info.use}.`
+        : `Press it, then ${info.use}.`;
+    caption.innerHTML = `<b>${esc(info.icon)} ${esc(info.label)}</b> — ${esc(info.blurb)} <i>${esc(next)}</i>`;
+  }
   // The chips are rebuilt each time, so re-bind their taps to the same
   // intent pipeline every other on-screen control uses.
   bar.querySelectorAll("[data-intent]").forEach((btn) => {
@@ -1020,6 +1055,19 @@ function updateItemBar() {
       handleIntent("item", Number(btn.getAttribute("data-arg")));
     });
   });
+}
+
+// The prisoner-side twin of targetedSkillHint: an armed item is waiting on a
+// direction, and until it gets one nothing visible happens — which reads as a
+// dead button unless the hint bar says otherwise. Carries the item's own `use`
+// text so the rule and the keypress arrive together.
+function armedItemHint(kind, scheme = app.input?.activeScheme || "keyboard") {
+  const info = ITEM_INFO[kind];
+  // The caption above already carries the full rule, so this line only has to
+  // name the button — repeating `info.use` here wrapped the hint bar to two
+  // lines and said nothing the player had not just read.
+  const control = scheme === "gamepad" ? "D-pad" : scheme === "touch" ? "tap" : "arrows / WASD";
+  return `${info.icon} ${info.label} armed — ${control} to aim it  ·  press it again to cancel`;
 }
 
 // ---- Watcher skills ------------------------------------------------------

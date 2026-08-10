@@ -23,6 +23,9 @@ echo
 echo "== wincheck (escape end-screen) =="
 node tests/wincheck.mjs
 echo
+echo "== own escape (your win is YOUR escape, not a companion's) =="
+node tests/own-escape.mjs
+echo
 echo "== zone hud (quadrant readout + watcher position-leak gate) =="
 node tests/zone-hud.mjs
 echo
@@ -43,6 +46,9 @@ node tests/fair-information.mjs
 echo
 echo "== golden feather (one round of true sight, facing only, expires) =="
 node tests/feather.mjs
+echo
+echo "== item legibility (every item says what it does and what to press next) =="
+node tests/item-legibility.mjs
 echo
 echo "== hud layout (nothing overlaps, overflows, or is clipped at 5 viewports) =="
 node tests/hud-layout.mjs

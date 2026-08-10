@@ -42,12 +42,42 @@ export const ITEM_KINDS = Object.freeze({
   FEATHER: "feather",
 });
 
+// `blurb` says what the item DOES, `use` says how to fire it. Both are part of
+// the item's definition rather than tucked into the how-to-play panel, because
+// pickup is automatic — you walk over a thing and now you are carrying it, with
+// no shop screen or inspect step in between. Reported from play: "I picked up a
+// pair of scissors and had no idea what it was used for." An icon plus a noun
+// is not a rule; the HUD needs the rest of the sentence.
+//
+// `targeted: true` means the item needs a direction after arming, which is what
+// makes the difference between "press 1" and "press 1, then press a direction"
+// — the step players were silently missing.
 export const ITEM_INFO = Object.freeze({
-  [ITEM_KINDS.DISTRACT]: { label: "Distraction", icon: "🔔", requires: null },
-  [ITEM_KINDS.MUFFLE]: { label: "Muffle", icon: "🧣", requires: null },
-  [ITEM_KINDS.LOCKPICK]: { label: "Lockpick", icon: "🗝️", requires: OBJ.DOOR },
-  [ITEM_KINDS.CUTTERS]: { label: "Cutters", icon: "✂️", requires: OBJ.SWITCH },
-  [ITEM_KINDS.FEATHER]: { label: "Golden Feather", icon: "🪶", requires: null },
+  [ITEM_KINDS.DISTRACT]: {
+    label: "Distraction", icon: "🔔", requires: null, targeted: true,
+    blurb: "Throws a fake noise for the Watcher to chase, somewhere that isn't you.",
+    use: "pick the direction to throw it",
+  },
+  [ITEM_KINDS.MUFFLE]: {
+    label: "Muffle", icon: "🧣", requires: null, targeted: false,
+    blurb: "Silences this turn's movement, so you can run the full 3 tiles and leave nothing behind.",
+    use: "spends the moment you press it",
+  },
+  [ITEM_KINDS.LOCKPICK]: {
+    label: "Lockpick", icon: "🗝️", requires: OBJ.DOOR, targeted: true,
+    blurb: "Opens a door next to you for free, instead of spending your move on it.",
+    use: "pick the direction of the door",
+  },
+  [ITEM_KINDS.CUTTERS]: {
+    label: "Cutters", icon: "✂️", requires: OBJ.SWITCH, targeted: true,
+    blurb: "Kills a whole bank of lights for good. The gaze cannot capture you on a dark tile.",
+    use: "stand next to a light switch and pick its direction",
+  },
+  [ITEM_KINDS.FEATHER]: {
+    label: "Golden Feather", icon: "🪶", requires: null, targeted: false,
+    blurb: "Shows the eye's true facing for one round, so your Gaze readout stops saying \"?\".",
+    use: "spends the moment you press it",
+  },
 });
 
 export const DIRS = Object.freeze(["North", "East", "South", "West"]);
