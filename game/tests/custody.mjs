@@ -8,7 +8,8 @@
 //
 // The traps this file is built around:
 //  * a reprieve that hands you straight back on the very next scan is not a
-//    reprieve (RELEASE_GRACE_ROUNDS);
+//    reprieve, and it has to be counted in the player's OWN turns, not rounds
+//    (RELEASE_GRACE_TURNS);
 //  * three turns must mean three of YOUR turns, not three of anyone's;
 //  * `alive` stopped meaning "can act", so every gate that used to read it has
 //    to read custody as well or a cuffed prisoner can still walk out;
@@ -18,7 +19,7 @@ import { generateMap, MAP_DEFAULTS, ITEM_KINDS } from "../src/map.js";
 import {
   createGame, endPrisonerTurn, endWatcherTurn, isOver, watcherScan, moveGuards,
   moveActivePrisoner, breakWindow, useItem, struggle, guardOver,
-  CUSTODY_TURNS, STRUGGLE_CHANCE, RELEASE_GRACE_ROUNDS,
+  CUSTODY_TURNS, STRUGGLE_CHANCE, RELEASE_GRACE_TURNS, MP_PER_TURN,
   GUARD_ACTION_POINTS, GUARD_CAPTURE_COST, ROUND_LIMIT,
   distractTarget, quadrantOf,
 } from "../src/rules.js";
@@ -269,23 +270,73 @@ section("capture seizes; the clock is what kills");
   g.turn = "Prisoner";
   const r = struggle(g, () => 0);
   check(r.freed, "they work loose");
-  check(p.graceUntilRound === g.round + RELEASE_GRACE_ROUNDS,
-    `and carry ${RELEASE_GRACE_ROUNDS} round of grace (through round ${p.graceUntilRound})`);
+  check(p.graceTurns === RELEASE_GRACE_TURNS,
+    `and carry ${RELEASE_GRACE_TURNS} turns of grace (got ${p.graceTurns})`);
+  check(p.mp === MP_PER_TURN,
+    `and get their whole turn back to run with (${p.mp} move points)`);
   g.turn = "Watcher";
   const again = watcherScan(g);
   check(!again.caught && !p.custody,
     "the very next scan, from the same gaze on the same tile, cannot re-take them");
-  // ...and the grace is one round, not immunity.
-  g.round = p.graceUntilRound + 1;
-  g.turn = "Watcher";
-  const third = watcherScan(g);
-  check(!!third.caught && p.custody === CUSTODY_TURNS, "a round later the eye can take them again");
+}
+
+// ---- 11b. The grace spans THEIR next turn, not the next round ------------
+// The distinction that makes this feel right instead of arbitrary: `round`
+// ticks once per PRISONER turn, so with a group of three, a grace measured in
+// rounds covered the immediate scan and then expired two companion turns
+// before the player got to act again — exactly the turn they were promised.
+{
+  const g = build();
+  const p = g.prisoners[0];
+  const c = map.center;
+  // Park them lit and inside a north-facing wedge, and keep them there: every
+  // scan below would take them if the grace were not holding.
+  p.x = c.x;
+  p.y = c.y - (map.cfg.towerRadius + map.cfg.moatThickness + 2);
+  g.noise.push({ x: p.x, y: p.y, ttl: 99, source: "test" });
+  g.round = 2;
+  g.watcher.facing = 0;
+  g.turn = "Prisoner";
+  p.custody = CUSTODY_TURNS;
+  const freed = struggle(g, () => 0);
+  check(freed.freed, "they work loose on their own turn");
+
+  // Walk the whole group round once, refreshing the noise so exposure never
+  // lapses for a reason other than the rule under test. Count the scans that
+  // happen before the human's next turn comes back around.
+  const cycle = () => {
+    endPrisonerTurn(g);
+    g.noise = [{ x: p.x, y: p.y, ttl: 99, seq: 1, source: "test" }];
+    watcherScan(g);
+    endWatcherTurn(g);
+  };
+  let scansSurvived = 0;
+  cycle(); // the scan answering the turn they broke free on
+  scansSurvived += p.custody ? 0 : 1;
+  while (g.activePrisoner !== 0 && scansSurvived < 10) {
+    cycle();
+    if (!p.custody) scansSurvived++;
+  }
+  check(!p.custody, `survived every scan back to their own turn (${scansSurvived})`);
+  check(g.activePrisoner === 0, "and it is their turn again");
+  check(p.graceTurns === 1, `with one turn of grace still on the clock (got ${p.graceTurns})`);
+
+  // Their promised next turn: still untouchable.
+  cycle();
+  check(!p.custody, "the scan answering their next turn cannot take them either");
+
+  // And then it is over — the immunity is two turns, not a state.
+  let guard = 0;
+  while (g.activePrisoner !== 0 && guard++ < 10) cycle();
+  check(p.graceTurns === 0, "the grace is spent");
+  cycle();
+  check(p.custody === CUSTODY_TURNS, "the turn after that, the eye takes them again");
 }
 {
   // Guards are physical: the grace does not stop them.
   const g = build();
   const p = g.prisoners[0];
-  p.graceUntilRound = g.round + 5;
+  p.graceTurns = RELEASE_GRACE_TURNS;
   g.watcher.guards = [{ id: 1, x: p.x + 1, y: p.y, quadrant: 0, ap: GUARD_ACTION_POINTS, turnsActive: 0, spent: false }];
   g.noise = [];
   moveGuards(g);

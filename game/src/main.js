@@ -34,7 +34,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.52.0";
+const BUILD = "beta-0.53.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -714,6 +714,14 @@ function hintFor() {
   if (prisoner && humanControlsPrisoner()) {
     const me = g.prisoners[g.activePrisoner];
     if (me?.custody > 0) return custodyHint(me, scheme);
+    // Just out of a cell. This window is the only time in the game the gaze
+    // cannot touch you, and it is short — saying so turns it from invisible
+    // luck into the thing you spend crossing the open ground you have been
+    // creeping around all match.
+    if (me?.graceTurns > 0) {
+      const move = scheme === "gamepad" ? "Stick / D-pad" : scheme === "touch" ? "Tap a direction" : "WASD / arrows";
+      return `🟢 LOOSE — the eye cannot take you for ${me.graceTurns} more turn${me.graceTurns === 1 ? "" : "s"} (guards still can)  ·  ${move}: run  ·  use it`;
+    }
   }
   const staged = app.stagedPath.length > 0;
   // Only advertise item controls when something is actually carried —

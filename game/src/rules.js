@@ -88,12 +88,21 @@ export const CUSTODY_TURNS = 3;
 // are what actually answer a cell. The point was never that custody is
 // survivable; it is that it is survivable IF YOU PREPARED.
 export const STRUGGLE_CHANCE = 0.15;
-// Rounds of immunity from the GAZE after getting out. Without it the eye that
-// took you is usually still pointed at the tile it took you on, so release
-// would hand you straight back on the same scan and the reprieve would be
-// theatre. Guards are not included — they are physical, and standing next to
-// one after slipping your cuffs should still be frightening.
-export const RELEASE_GRACE_ROUNDS = 1;
+// Immunity from the GAZE after getting out, counted in the released prisoner's
+// OWN turns — the turn they broke free on, and the one after it.
+//
+// Counted in their own turns rather than in rounds for the same reason the
+// custody clock is: `round` ticks once per PRISONER turn, so with a group of
+// three, "one round of grace" covered the next scan and then expired two
+// companion turns before the player acted again. What a player means by "I
+// can't be caught again next turn" is their own next turn.
+//
+// Without any of this the eye that took you is usually still pointed at the
+// tile it took you on, so release would hand you straight back on the same
+// scan and the reprieve would be theatre. Guards are deliberately NOT
+// included — they are physical, and standing next to one after slipping your
+// cuffs should still be frightening.
+export const RELEASE_GRACE_TURNS = 2;
 export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher
 export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)
 
@@ -114,9 +123,9 @@ export function createGame(map, opts = {}) {
       // `alive` — that is the point of the mechanic — so anything that used to
       // read `alive` as "can act" must now check this too.
       custody: 0,
-      // Round through which the GAZE cannot take this prisoner, set on release
-      // from custody. See RELEASE_GRACE_ROUNDS.
-      graceUntilRound: 0,
+      // Turns of gaze immunity left after getting out of custody, spent one
+      // per turn of THIS prisoner's own. See RELEASE_GRACE_TURNS.
+      graceTurns: 0,
       openedDoors: new Set(),
       // Tiles where THIS prisoner made noise this turn — their own private
       // "I heard that" feedback (unlike game.noise, the Watcher's shared
@@ -398,8 +407,25 @@ function seize(game, p, by) {
 // Out of the cell and back on the board, on the tile they were held on.
 function release(game, p, how) {
   p.custody = 0;
-  p.graceUntilRound = game.round + RELEASE_GRACE_ROUNDS;
-  logMsg(game, `Prisoner ${p.id + 1} is loose again (${how}).`);
+  p.graceTurns = RELEASE_GRACE_TURNS;
+  // Getting out gives you the REST OF THAT TURN, not just a pulse before the
+  // Watcher scans. Seizure zeroed their move points, so without this a
+  // prisoner who shimmed a cuff open stood in the doorway until their next
+  // turn — which, with the eye already pointed at them, mostly meant walking
+  // straight back into the same capture. Only applies when they freed
+  // themselves on their own turn; a companion's rescue lands on the RESCUER's
+  // turn, and the freed prisoner's own turn refreshes their points normally
+  // when it comes around.
+  if (game.turn === "Prisoner" && game.prisoners[game.activePrisoner] === p) {
+    p.mp = MP_PER_TURN;
+    // Movement noise is measured from where the turn started, and for a held
+    // prisoner that is the cell. Re-anchoring here means the walk out is
+    // priced from the cell door rather than from wherever they were standing
+    // when the turn began — the same tile in practice, but the rule should not
+    // depend on that happening to be true.
+    p.startTurnPos = { x: p.x, y: p.y };
+  }
+  logMsg(game, `Prisoner ${p.id + 1} is loose again (${how}) — ${RELEASE_GRACE_TURNS} turns before the eye can take them.`);
 }
 
 // The free attempt: no item, poor odds, and nothing at all under a guard's
@@ -1126,8 +1152,9 @@ export function watcherScan(game, difficulty = "medium") {
     if (p.custody) continue; // already in a cell; the eye has nothing left to find
     // Just out of custody: the eye that took them is usually still pointed at
     // the tile it took them on, so without this the reprieve would end on the
-    // very next scan and mean nothing.
-    if (game.round <= p.graceUntilRound) continue;
+    // very next scan and mean nothing. Spans their own next turn too, which is
+    // why it is counted in turns rather than rounds.
+    if (p.graceTurns > 0) continue;
     if (!inGaze(game, dir, p.x, p.y)) continue;
     if (isExposed(game, p.x, p.y, difficulty)) {
       seize(game, p, "gaze");
@@ -1173,6 +1200,11 @@ export function endWatcherTurn(game) {
   }
   game.activePrisoner = next;
   const p = game.prisoners[next];
+  // Post-release grace burns down on the released prisoner's OWN turns, and
+  // at the START of one rather than the end: decrementing at end-of-turn
+  // would expire the last turn's protection just before the scan that turn's
+  // movement is answered by, which is the scan it exists to cover.
+  if (p.graceTurns > 0) p.graceTurns -= 1;
   p.mp = MP_PER_TURN;
   p.startTurnPos = { x: p.x, y: p.y };
   p.selfNoise = []; // "erased when the Watcher's turn begins" — gone by next turn
