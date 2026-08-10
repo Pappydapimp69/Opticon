@@ -48,9 +48,21 @@ const server = http.createServer((req, res) => {
     }
     return -1;
   });
-  const keyByDir = ["KeyW","KeyD","KeyS","KeyA"];
-  if (dir >= 0) {
-    await page.keyboard.press(keyByDir[dir]); // stage the move (hypothetical, not yet real)
+  // Movement keys are SCREEN directions (the camera orbits), so the key for a
+  // given world cardinal has to be looked up, not assumed. This happened to
+  // pass with a fixed table only because the default camera makes up==North.
+  const key = dir < 0 ? null : await page.evaluate((d) => {
+    const app = window.__opticon;
+    const p = app.game.prisoners[0];
+    for (let sd = 0; sd < 4; sd++) {
+      if (app.renderer.screenDirToWorld(sd, { x: p.x, y: p.y }) === d) {
+        return ["KeyW", "KeyD", "KeyS", "KeyA"][sd];
+      }
+    }
+    return null;
+  }, dir);
+  if (dir >= 0 && key) {
+    await page.keyboard.press(key); // stage the move (hypothetical, not yet real)
     await page.waitForTimeout(200);
     await page.keyboard.press("Space"); // commit — actually steps onto the exit
   }

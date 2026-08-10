@@ -21,6 +21,9 @@ import {
   skillUsable,
   inWatcherGaze,
   quadrantOf,
+  struggle,
+  guardOver,
+  CUSTODY_TURNS,
   SKILLS,
   SKILL_INFO,
 } from "./rules.js";
@@ -31,7 +34,7 @@ import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
 
-const BUILD = "beta-0.51.0";
+const BUILD = "beta-0.52.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -705,6 +708,13 @@ function hintFor() {
   // targeted skills already got — items were the side that never had it, which
   // is why arming one felt like nothing happened.
   if (prisoner && armedItem) return armedItemHint(armedItem, scheme);
+  // Custody overrides every movement hint below it: none of those controls do
+  // anything from a cell, and the three turns are short enough that spending
+  // one reading the wrong instructions is a real loss.
+  if (prisoner && humanControlsPrisoner()) {
+    const me = g.prisoners[g.activePrisoner];
+    if (me?.custody > 0) return custodyHint(me, scheme);
+  }
   const staged = app.stagedPath.length > 0;
   // Only advertise item controls when something is actually carried —
   // otherwise the hint teaches a verb the player has no way to perform yet.
@@ -824,11 +834,36 @@ function updateBreakToggleUI() {
 
 function handlePrisonerIntent(intent, arg) {
   if (!humanControlsPrisoner()) return; // AI prisoner; ignore input
+  // Every direction a Prisoner can give is SPATIAL — W/A/S/D, the arrow keys,
+  // the on-screen ▲▼◀▶ pad, a d-pad, a stick. There is no labelled N/E/S/W
+  // control on this side at all (unlike the Watcher's bluff buttons), so all
+  // of them mean "the direction I am pointing at on screen" and none of them
+  // mean a compass bearing. Up is up, whatever the camera is currently
+  // looking at — the prisoner camera orbits and the overview can be spun, so
+  // a hardcoded up=North walked the player somewhere other than where they
+  // pointed the moment the view turned.
+  //
+  // Same resolver the Watcher's d-pad already used (render.js
+  // screenDirToWorld), applied at the one place every prisoner direction
+  // funnels through: `move` also carries the aim for an armed item and, via
+  // the break modifier, the window to smash.
+  if (intent === "move" || intent === "break") {
+    // Resolved from where the prisoner is standing, not the map centre: under
+    // perspective the screen direction of a world cardinal shifts across the
+    // map, and a move is given from the avatar.
+    const me = app.game?.prisoners[app.game.activePrisoner];
+    const tip = app.stagedPath.length ? app.stagedPath[app.stagedPath.length - 1] : me;
+    arg = app.renderer.screenDirToWorld(arg, tip ? { x: tip.x, y: tip.y } : null);
+  }
   if (intent === "toggleBreak") {
     breakArmed = !breakArmed;
     if (breakArmed) armedItem = null; // mutually exclusive modes
     app.audio.play("ui");
     updateBreakToggleUI();
+    return;
+  }
+  if (intent === "struggle") {
+    doStruggle();
     return;
   }
   if (intent === "item") {
@@ -877,6 +912,60 @@ function handlePrisonerIntent(intent, arg) {
 // so it's refused outright while a move is still staged (unresolved),
 // rather than silently breaking relative to a position the player hasn't
 // actually committed to yet.
+function doStruggle() {
+  const g = app.game;
+  if (!g || g.turn !== "Prisoner") return;
+  const p = g.prisoners[g.activePrisoner];
+  if (!p.custody) {
+    app.audio.play("blocked");
+    app.ui.hint("Nothing to fight — you are not in custody.");
+    return;
+  }
+  const r = struggle(g);
+  if (!r.ok) {
+    app.audio.play("blocked");
+    app.ui.hint(r.reason === "already-tried" ? "You have already tried this turn." : hintFor());
+  } else if (r.freed) {
+    app.audio.play("glass");
+    app.ui.hint("The cuff gives — you are loose.");
+  } else {
+    app.audio.play("blocked");
+    app.ui.hint(r.blockedBy === "guard"
+      ? "A guard has a hand on you — struggling is hopeless while one is posted."
+      : "The cuffs hold. Try again, or spend something.");
+  }
+  updateItemBar();
+  updateCustodyUI();
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+}
+
+// Swap the d-pad for the Struggle button while the human's own prisoner is
+// held. Walking is not a choice they have, so offering the pad would be
+// offering a control that does nothing.
+let _custodySig = "";
+function updateCustodyUI() {
+  const g = app.game;
+  const p = g && g.turn === "Prisoner" && humanControlsPrisoner() ? g.prisoners[g.activePrisoner] : null;
+  const held = !!(p && p.custody > 0);
+  const pad = document.getElementById("prisonerControls");
+  const btn = document.getElementById("struggleBtn");
+  if (btn) btn.classList.toggle("hidden", !held);
+  if (pad) pad.classList.toggle("cuffed", held);
+  // The stat rail and hint bar are refreshed from handleIntent, i.e. only when
+  // the player does something. Custody starts and ends on turns that are NOT
+  // the player's — a Watcher scan seizes you, a companion walking past frees
+  // you — so without this the Held counter and the cell instructions could sit
+  // a whole turn behind the actual state. Signature-guarded so the common
+  // case (nothing changed) costs one string compare a frame.
+  const sig = `${held}|${p ? p.custody : ""}`;
+  if (sig === _custodySig) return;
+  _custodySig = sig;
+  if (!g) return; // menu / pre-game: there is no HUD to refresh yet
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
+  app.ui.hint(hintFor());
+}
+
 function doBreakWindow(dir) {
   const g = app.game;
   if (!g || g.turn !== "Prisoner") return;
@@ -911,7 +1000,13 @@ function armItemSlot(slot) {
     app.audio.play("blocked");
     return;
   }
-  if (kind === ITEM_KINDS.MUFFLE || kind === ITEM_KINDS.FEATHER) {
+  // Fire untargeted items immediately instead of arming them. This used to be
+  // a hardcoded `kind === MUFFLE || kind === FEATHER`, which silently broke
+  // the moment two more untargeted items existed: pressing 1 on a Shim armed
+  // it, showed "Shim armed — arrows to aim it", and waited forever for a
+  // direction it has no use for. Reading the item's own `targeted` field means
+  // a new item cannot reintroduce the bug.
+  if (!ITEM_INFO[kind].targeted) {
     doUseItem(kind, null); // no target — resolves the moment it is spent
     return;
   }
@@ -999,6 +1094,17 @@ function updateZoneHud() {
 // rather than depend on nobody ever putting an ampersand in a blurb.
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// Can this item do anything in the state the prisoner is in right now? Mirrors
+// the same split useItem() enforces (rules.js): custody items are inert while
+// free, world items are inert while held, and the Flare is thrown so it works
+// from either side of the bars.
+function usableNow(kind, p) {
+  const heldOnly = !!ITEM_INFO[kind].heldOnly;
+  if (heldOnly) return p.custody > 0;
+  if (p.custody > 0) return kind === ITEM_KINDS.FLARE;
+  return true;
+}
+
 let _itemBarSig = "";
 function updateItemBar() {
   const bar = document.getElementById("itemBar");
@@ -1007,7 +1113,9 @@ function updateItemBar() {
   const show = g && g.turn === "Prisoner" && humanControlsPrisoner();
   const p = show ? g.prisoners[g.activePrisoner] : null;
   const caption = document.getElementById("itemCaption");
-  const sig = p ? `${p.items.join(",")}|${armedItem || ""}|${padSlot}` : "";
+  // Custody is part of the signature: the same belt means different chips
+  // in and out of a cell, since half the belt is unusable in each state.
+  const sig = p ? `${p.items.join(",")}|${armedItem || ""}|${padSlot}|${p.custody}` : "";
   if (sig === _itemBarSig) return;
   _itemBarSig = sig;
   if (!p || !p.items.length) {
@@ -1021,10 +1129,15 @@ function updateItemBar() {
     .map((kind, i) => {
       const info = ITEM_INFO[kind];
       const armed = (armedItem === kind ? " armed" : "") + (padSlot === i ? " padsel" : "");
+      // Dim what this state cannot spend, the same way the Watcher's skill
+      // bar dims a cooling skill: a Shim is inert until you are caught, and
+      // a Lockpick is inert once you are — pressing either and getting
+      // nothing is how a player concludes an item is broken.
+      const dead = usableNow(kind, p) ? "" : " unusable";
       // The name rides ON the chip, not in a title= tooltip. Hover doesn't
       // exist on touch and can't be reached by gamepad, so a tooltip taught
       // the item's name only to the one input scheme that needed it least.
-      return `<button class="item-chip${armed}" data-intent="item" data-arg="${i}" title="${info.label}">` +
+      return `<button class="item-chip${armed}${dead}" data-intent="item" data-arg="${i}" title="${esc(info.label)}">` +
         `<span class="ic">${info.icon}</span><span class="ik">${i + 1}</span>` +
         `<span class="iname">${info.label}</span></button>`;
     })
@@ -1040,11 +1153,16 @@ function updateItemBar() {
     const info = ITEM_INFO[focus];
     const armedNow = armedItem === focus;
     caption.classList.remove("empty");
-    const next = !info.targeted
-      ? "Spends the moment you press it."
-      : armedNow
-        ? `Armed — now ${info.use}.`
-        : `Press it, then ${info.use}.`;
+    // A dimmed chip has to say WHY, or it reads as a bug rather than a rule.
+    const next = !usableNow(focus, p)
+      ? (info.heldOnly
+          ? "Nothing to use it on until you are caught."
+          : "No use for this from inside a cell.")
+      : !info.targeted
+        ? "Spends the moment you press it."
+        : armedNow
+          ? `Armed — now ${info.use}.`
+          : `Press it, then ${info.use}.`;
     caption.innerHTML = `<b>${esc(info.icon)} ${esc(info.label)}</b> — ${esc(info.blurb)} <i>${esc(next)}</i>`;
   }
   // The chips are rebuilt each time, so re-bind their taps to the same
@@ -1055,6 +1173,19 @@ function updateItemBar() {
       handleIntent("item", Number(btn.getAttribute("data-arg")));
     });
   });
+}
+
+// What a held prisoner can actually do, and — the part that decides the turn —
+// whether a guard is posted, because that single fact flips the right move
+// from "struggle" to "you need an item".
+function custodyHint(p, scheme = app.input?.activeScheme || "keyboard") {
+  const fight = scheme === "gamepad" ? "X" : scheme === "touch" ? "Struggle" : "F";
+  const end = scheme === "gamepad" ? "A" : scheme === "touch" ? "End" : "Space";
+  const turns = `${p.custody} turn${p.custody === 1 ? "" : "s"} before processing`;
+  if (guardOver(app.game, p)) {
+    return `⛓️ HELD — ${turns}  ·  a guard is posted: struggling will not work  ·  ${fight}: try anyway  ·  ${end}: end turn`;
+  }
+  return `⛓️ HELD — ${turns}  ·  ${fight}: fight the cuffs  ·  1-2: spend an item  ·  ${end}: end turn`;
 }
 
 // The prisoner-side twin of targetedSkillHint: an armed item is waiting on a
@@ -1793,6 +1924,7 @@ function loop(t) {
   pollStartHold(t);
   updateDangerVignette();
   updateItemBar();
+  updateCustodyUI();
   updateSkillBar();
   updateSuspicionHud();
   updateZoneHud();

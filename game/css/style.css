@@ -455,10 +455,32 @@ html, body {
 .roster .pip.run { color: var(--prisoner); }
 .roster .pip.down { color: #ff5f6d; opacity: .75; }
 .roster .pip.out { color: #59f7a6; }
+/* Held: guard-orange and pulsing, because it is a countdown, not a result. */
+.roster .pip.held { color: #ff9b3d; animation: dangerPulse 1.4s ease-in-out infinite; }
 .roster .pip.act { text-shadow: 0 0 8px currentColor; transform: scale(1.18); }
 
 /* Item/skill name, always visible — a title= tooltip only ever reached the
    one input scheme (mouse) that needed the help least. */
+/* ---- Custody -------------------------------------------------------------
+   A held prisoner has no movement to give, so the d-pad greys out and the
+   Struggle button takes its place — the control surface tells you the state
+   before you read a word of it. */
+/* Hidden, not dimmed. Dimmed to 25% they still occupied their grid cells and
+   the ◀ ▶ showed through the Struggle button sitting across the same row. */
+.pad.cuffed .tbtn:not(.struggle-btn) { display: none; }
+.struggle-btn.hidden { display: none; }
+.struggle-btn {
+  grid-column: 1 / -1; grid-row: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border-color: #b5462f; background: rgba(60, 20, 12, .85); color: #ffd9c8;
+  animation: dangerPulse 1.6s ease-in-out infinite;
+}
+.struggle-btn span { font-size: 10px; letter-spacing: .04em; }
+
+/* Item chips this state cannot spend. Same grammar as a cooling skill chip,
+   so "dim means not now" is one rule across both bars. */
+.item-chip.unusable { opacity: .42; filter: grayscale(.75); }
+
 /* What the highlighted item does. Sits under the chips rather than inside one:
    a rule is a sentence and a chip is 54px wide, and the caption has to stay
    readable on a phone where the chip labels are already down to 9px. */

@@ -15,6 +15,9 @@ import {
   objAt,
   isDoorOpen,
   ITEM_CAP,
+  struggle,
+  guardOver,
+  CUSTODY_TURNS,
 } from "./rules.js";
 import { ITEM_KINDS, OBJ } from "./map.js";
 import { costPath, stepToward } from "./pathfind.js";
@@ -202,6 +205,71 @@ function nearbyItem(game, p) {
   return best;
 }
 
+// A turn spent in a cell. One decision, taken in priority order, because the
+// clock only allows three of them:
+//
+//  1. Shim — the certain out. Never worth saving: the item exists for exactly
+//     this moment and there is no later.
+//  2. Flare — only when a guard is actually posted, since that is the one
+//     situation struggling cannot beat. Throwing it at empty air wastes the
+//     only tool that clears a guard.
+//  3. Struggle — free, so always tried when it can do anything.
+//  4. Forged Transfer — LAST, and only on the final turn. Spending it early
+//     resets a clock that had turns left on it; spending it at 1 turn
+//     remaining is the difference between three more attempts and none.
+function custodyTurn(game, p, rng, skill) {
+  const tune = PRISONER_SKILL[skill] || PRISONER_SKILL.medium;
+  if (p.items.includes(ITEM_KINDS.SHIM) && useItem(game, ITEM_KINDS.SHIM, null).ok) return;
+
+  const posted = !!guardOver(game, p);
+  if (posted && tune.useItems && p.items.includes(ITEM_KINDS.FLARE)) {
+    // Any direction that gives the flare somewhere to land; the pull is by
+    // quadrant, so the exact tile matters far less than getting it away.
+    for (let d = 0; d < 4; d++) {
+      if (useItem(game, ITEM_KINDS.FLARE, d).ok) break;
+    }
+  }
+
+  // Re-check: a flare that pulled the guard away makes this turn's struggle
+  // live, which is the entire point of carrying one.
+  if (!guardOver(game, p)) {
+    const r = struggle(game, rng);
+    if (r.ok && r.freed) return;
+  }
+
+  if (p.custody <= 1 && p.items.includes(ITEM_KINDS.TRANSFER)) {
+    useItem(game, ITEM_KINDS.TRANSFER, null);
+  }
+}
+
+// One turn's move (3) plus the adjacency the rescue itself needs.
+const RESCUE_REACH = 4;
+
+// Is any teammate close enough to be worth walking to instead of the exit?
+// Returns the held prisoner a rescuer should divert toward, or null. Only
+// looks at prisoners the rescuer could plausibly reach before the clock runs
+// out — a rescue that arrives after processing is just a detour into the
+// Watcher's field of view.
+function rescueTarget(game, me) {
+  let best = null;
+  let bestD = Infinity;
+  for (const p of game.prisoners) {
+    if (p === me || !p.alive || p.escaped || !p.custody) continue;
+    const d = Math.max(Math.abs(p.x - me.x), Math.abs(p.y - me.y));
+    // Opportunistic only: reachable within a single turn's move (MP_PER_TURN
+    // is 3, and a rescue only needs to end ADJACENT). An earlier version
+    // allowed `custody * 3 + 1` — up to ten tiles — reasoning that three turns
+    // buys three moves. Measured, that was strictly worse: it marched
+    // companions across the map toward the one tile the tower had just proved
+    // it was watching, and AI-vs-AI escape on hard fell 29% -> 21% while easy
+    // rose. A rescue you have to cross the yard for is not a rescue, it is two
+    // captures.
+    if (d > RESCUE_REACH) continue;
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
 // Spend carried items when they'd actually help THIS turn. Each check
 // mirrors the item's own precondition, so a use is never attempted that
 // rules.js would just refuse.
@@ -249,6 +317,10 @@ function useItemsOpportunistically(game, p, committed, rng, belief, tune) {
 // rng: optional () => [0,1) for tie-breaking variety.
 export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   const p = game.prisoners[game.activePrisoner];
+  // In a cell there is exactly one problem, and none of the route planning
+  // below applies — a held prisoner cannot move, so falling through would
+  // burn all three of their turns doing nothing.
+  if (p.custody > 0) return custodyTurn(game, p, rng, skill);
   const exit = game.map.exit;
   const startPos = { x: p.x, y: p.y };
   const tune = PRISONER_SKILL[skill] || PRISONER_SKILL.medium;
@@ -291,13 +363,21 @@ export function prisonerAITurn(game, rng = Math.random, skill = "medium") {
   // A short detour to a pickup, but never while committed — the whole point
   // of the commit state is that it stops making side trips.
   const detour = committed || !tune.useItems ? null : nearbyItem(game, p);
+  // A teammate in a cell outranks both the exit and any pickup. This is the
+  // only thing companions can do for the human now that only your own escape
+  // wins the game, and it has to survive `committed` — the anti-stall state
+  // exists to stop dithering, not to walk past someone who is about to be
+  // processed.
+  const rescue = rescueTarget(game, p);
 
   while (p.mp > 0 && !isOver(game)) {
     // Prefer a route that avoids dangerous tiles; fall back to shortest.
     // Risk is a COST, not a wall. `committed` (the anti-stall state) drops it
     // to zero, which is the whole point of committing: stop paying to be safe.
     const risk = committed || !tune.riskAversion ? null : riskPenalty(game, belief, tune);
-    const goal = detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
+    const goal = rescue && rescue.custody
+      ? rescue
+      : detour && !isItemTaken(game, detour.x, detour.y) ? detour : exit;
     const path = costPath(game.map, p.x, p.y, goal.x, goal.y, risk);
     if (!path || path.length < 2) break;
 

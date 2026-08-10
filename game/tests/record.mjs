@@ -87,8 +87,14 @@ async function finishAs(page, winner) {
   if (winner === "Prisoner") {
     // Stand next to the gate, then walk onto it for real: the escape fires
     // when the avatar visibly arrives, which is the path that ends the game.
+    // Arrow keys are SCREEN directions now, not compass bearings (the camera
+    // orbits, so up is the top of the map as drawn). This used to press
+    // `["ArrowUp","ArrowRight",...][worldDir]` and walk somewhere that was not
+    // the gate. Ask the game's own resolver which screen direction currently
+    // lands on the world direction we need.
     const dir = await page.evaluate(() => {
-      const g = window.__opticon.game;
+      const app = window.__opticon;
+      const g = app.game;
       const p = g.prisoners[0];
       const e = g.map.exit;
       const D = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N E S W
@@ -96,7 +102,10 @@ async function finishAs(page, winner) {
         const sx = e.x - D[d][0], sy = e.y - D[d][1];
         if (sx < 0 || sy < 0 || sx >= g.map.size || sy >= g.map.size) continue;
         p.x = sx; p.y = sy; p.mp = p.mpMax || 3;
-        return d;
+        for (let sd = 0; sd < 4; sd++) {
+          if (app.renderer.screenDirToWorld(sd, { x: sx, y: sy }) === d) return sd;
+        }
+        return -1;
       }
       return -1;
     });

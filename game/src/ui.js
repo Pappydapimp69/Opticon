@@ -15,6 +15,8 @@ export class UI {
       facing: document.getElementById("facingLabel"),
       mp: document.getElementById("mpLabel"),
       mpStat: document.getElementById("mpStat"),
+      custody: document.getElementById("custodyLabel"),
+      custodyStat: document.getElementById("custodyStat"),
       gazeStat: document.getElementById("gazeStat"),
       round: document.getElementById("roundLabel"),
       view: document.getElementById("viewLabel"),
@@ -86,7 +88,15 @@ export class UI {
     // and a Prisoner read a permanent "?" — two dead slots on a rail that has
     // to fit one line on a phone.
     const humanIsWatcher = humanRole === "Watcher";
-    if (this.el.mpStat) this.el.mpStat.classList.toggle("hidden", humanIsWatcher);
+    // The processing clock replaces Move while the acting prisoner is held:
+    // Move is stuck at ○○○ in a cell and says nothing, while "2 turns left"
+    // is the only number the player can still act on.
+    const held = !humanIsWatcher && p.custody > 0;
+    if (this.el.mpStat) this.el.mpStat.classList.toggle("hidden", humanIsWatcher || held);
+    if (this.el.custodyStat) this.el.custodyStat.classList.toggle("hidden", !held);
+    if (this.el.custody && held) {
+      this.el.custody.textContent = `${p.custody} turn${p.custody === 1 ? "" : "s"}`;
+    }
     // Show the cap, and warn once it's genuinely close — a limit nobody can
     // see isn't pressure, it's an ambush.
     this.el.round.textContent = `${game.round}/${ROUND_LIMIT}`;
@@ -131,10 +141,16 @@ export class UI {
     el.parentElement.classList.remove("hidden");
     el.innerHTML = game.prisoners
       .map((p, i) => {
-        const state = p.escaped ? "out" : !p.alive ? "down" : "run";
+        // Held is its own state, not a shade of "down" — a companion in a
+        // cell is someone you can still walk over and let out, and the roster
+        // is the only place a player sees that it happened to someone else.
+        const state = p.escaped ? "out" : !p.alive ? "down" : p.custody ? "held" : "run";
         const active = game.turn === "Prisoner" && game.activePrisoner === i ? " act" : "";
-        const glyph = p.escaped ? "◎" : !p.alive ? "✕" : "●";
-        return `<span class="pip ${state}${active}" title="Prisoner ${i + 1}">${glyph}</span>`;
+        const glyph = p.escaped ? "◎" : !p.alive ? "✕" : p.custody ? "⛓" : "●";
+        const title = p.custody
+          ? `Prisoner ${i + 1} — held, ${p.custody} turn${p.custody === 1 ? "" : "s"} left`
+          : `Prisoner ${i + 1}`;
+        return `<span class="pip ${state}${active}" title="${title}">${glyph}</span>`;
       })
       .join("");
   }

@@ -64,7 +64,36 @@ export const GUARD_SIGHT = 1;         // squares seen in EVERY direction
 // termination while leaving the measured distribution essentially untouched.
 // Note `round` ticks once per PRISONER turn, so with a group of 3 this is
 // ~30 full rotations of the group.
+
 export const ROUND_LIMIT = 90;
+
+// ---- Custody -------------------------------------------------------------
+// Being caught used to be instant deletion: `p.alive = false`, no appeal. That
+// is the harshest possible reading of a panopticon — the eye finds you and you
+// simply stop existing — and it made every capture the end of the story rather
+// than the start of one. A prisoner is now SEIZED: held at the tile they were
+// taken on, unable to move, with three of their own turns to get out before
+// they are processed and gone for good.
+//
+// The clock is the whole design. Three turns is long enough for a plan (a
+// companion crossing the yard, a flare pulling the guard off you) and short
+// enough that being caught is still the worst thing that can happen.
+export const CUSTODY_TURNS = 3;
+// Bare-handed odds per attempt. These compound over the three turns, which is
+// the easy thing to get wrong: 0.3 a turn is not "poor odds", it is a 66%
+// escape rate for a prisoner carrying nothing (1 - 0.7^3), and measured that
+// way it lifted AI-vs-AI escape from 66/52/29% to 81/61/40% — capture stopped
+// meaning anything. At 0.15 the same three turns come to 39%, so getting out
+// with empty hands is a real long shot rather than the default, and the items
+// are what actually answer a cell. The point was never that custody is
+// survivable; it is that it is survivable IF YOU PREPARED.
+export const STRUGGLE_CHANCE = 0.15;
+// Rounds of immunity from the GAZE after getting out. Without it the eye that
+// took you is usually still pointed at the tile it took you on, so release
+// would hand you straight back on the same scan and the reprieve would be
+// theatre. Guards are not included — they are physical, and standing next to
+// one after slipping your cuffs should still be frightening.
+export const RELEASE_GRACE_ROUNDS = 1;
 export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher
 export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)
 
@@ -81,6 +110,13 @@ export function createGame(map, opts = {}) {
       startTurnPos: { x: p.x, y: p.y },
       alive: true,
       escaped: false,
+      // Turns of custody remaining. 0 === free. Held prisoners are still
+      // `alive` — that is the point of the mechanic — so anything that used to
+      // read `alive` as "can act" must now check this too.
+      custody: 0,
+      // Round through which the GAZE cannot take this prisoner, set on release
+      // from custody. See RELEASE_GRACE_ROUNDS.
+      graceUntilRound: 0,
       openedDoors: new Set(),
       // Tiles where THIS prisoner made noise this turn — their own private
       // "I heard that" feedback (unlike game.noise, the Watcher's shared
@@ -331,6 +367,81 @@ export function inWatcherGaze(game, dir, x, y) {
   }
 }
 
+// ---- Custody -------------------------------------------------------------
+
+// Is anyone holding this prisoner down right now? A guard standing within its
+// own one-square sight of a held prisoner is standing watch, and a struggle
+// under a guard's hand simply does not work — the items are the answer to a
+// posted guard, not muscle.
+export function guardOver(game, p) {
+  return game.watcher.guards.find(
+    (g) => Math.max(Math.abs(g.x - p.x), Math.abs(g.y - p.y)) <= GUARD_SIGHT
+  ) || null;
+}
+
+// Take a prisoner into custody. Replaces the old `p.alive = false` at both
+// capture sites (the gaze and the guards) — capture is now the beginning of a
+// three-turn problem rather than the end of a run.
+function seize(game, p, by) {
+  p.custody = CUSTODY_TURNS;
+  p.mp = 0;
+  p.muffled = false;
+  // PUBLIC, exactly as the old capture was: where and when someone was taken
+  // is announced, and it stays the strongest honest evidence a surviving
+  // prisoner gets about where the eye is really pointed.
+  game.lastCaught = { x: p.x, y: p.y, round: game.round };
+  logMsg(game, by === "guards"
+    ? `Guards seize Prisoner ${p.id + 1} — ${CUSTODY_TURNS} turns before processing.`
+    : `The gaze locks on — Prisoner ${p.id + 1} is seized, ${CUSTODY_TURNS} turns before processing.`);
+}
+
+// Out of the cell and back on the board, on the tile they were held on.
+function release(game, p, how) {
+  p.custody = 0;
+  p.graceUntilRound = game.round + RELEASE_GRACE_ROUNDS;
+  logMsg(game, `Prisoner ${p.id + 1} is loose again (${how}).`);
+}
+
+// The free attempt: no item, poor odds, and nothing at all under a guard's
+// hand. `rng` is passed in rather than reached for, so a test can decide the
+// coin flip and the AI's own seeded stream stays the only source of chance.
+export function struggle(game, rng = Math.random) {
+  if (game.turn !== "Prisoner" || game.status !== "playing") return { ok: false, reason: "not-your-turn" };
+  const p = game.prisoners[game.activePrisoner];
+  if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
+  if (!p.custody) return { ok: false, reason: "not-held" };
+  if (p.struggledThisTurn) return { ok: false, reason: "already-tried" };
+  p.struggledThisTurn = true;
+  const guard = guardOver(game, p);
+  if (guard) {
+    logMsg(game, `Prisoner ${p.id + 1} thrashes — a guard's hand holds them down.`);
+    return { ok: true, freed: false, blockedBy: "guard" };
+  }
+  if (rng() < STRUGGLE_CHANCE) {
+    release(game, p, "worked a hand free");
+    return { ok: true, freed: true };
+  }
+  logMsg(game, `Prisoner ${p.id + 1} strains against the cuffs — nothing gives.`);
+  return { ok: true, freed: false };
+}
+
+// A living teammate who ends their move within reach of a held prisoner opens
+// the cell. No item, no roll — it is the one thing companions can do for you
+// now that only your own escape wins the game, and it makes the group worth
+// keeping alive instead of pure camouflage.
+function resolveRescues(game, rescuer) {
+  if (!rescuer.alive || rescuer.escaped || rescuer.custody) return;
+  for (const p of game.prisoners) {
+    if (p === rescuer || !p.alive || p.escaped || !p.custody) continue;
+    if (Math.max(Math.abs(p.x - rescuer.x), Math.abs(p.y - rescuer.y)) > 1) continue;
+    if (guardOver(game, p)) {
+      logMsg(game, `Prisoner ${rescuer.id + 1} cannot reach Prisoner ${p.id + 1} — a guard is posted.`);
+      continue;
+    }
+    release(game, p, `Prisoner ${rescuer.id + 1} got them out`);
+  }
+}
+
 // ---- Prisoner actions ----------------------------------------------------
 
 export function moveActivePrisoner(game, dir) {
@@ -339,6 +450,7 @@ export function moveActivePrisoner(game, dir) {
   }
   const p = game.prisoners[game.activePrisoner];
   if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
+  if (p.custody) return { ok: false, reason: "held" }; // cuffed to the spot
   if (p.mp <= 0) return { ok: false, reason: "no-mp" };
 
   const { dx, dy } = DIR_VEC[dir];
@@ -429,8 +541,73 @@ export function useItem(game, kind, arg) {
   if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
   const slot = p.items.indexOf(kind);
   if (slot === -1) return { ok: false, reason: "not-carried" };
+  // Custody splits the belt in two. The cell items do nothing while you are
+  // walking around free, and everything that acts on the world through your
+  // own body — doors, switches, windows, your footsteps — does nothing while
+  // you are cuffed to a tile. The FLARE is the deliberate exception: it is
+  // thrown, so it works from inside a cell, which is what makes it the answer
+  // to a posted guard.
+  const heldOnly = !!ITEM_INFO[kind].heldOnly;
+  if (heldOnly && !p.custody) return { ok: false, reason: "only-in-custody" };
+  if (p.custody && !heldOnly && kind !== ITEM_KINDS.FLARE) {
+    return { ok: false, reason: "held" };
+  }
 
   const consume = () => p.items.splice(slot, 1);
+
+  // ---- Custody kit -------------------------------------------------------
+  // The Shim is the clean out: no roll, no timing, and it beats a posted
+  // guard, which is the one thing struggling and a companion rescue both
+  // cannot do. Its whole cost was paid earlier — a belt slot carried through
+  // the entire run for a situation that might never come.
+  if (kind === ITEM_KINDS.SHIM) {
+    consume();
+    release(game, p, "shimmed the cuffs");
+    return { ok: true, event: "shim" };
+  }
+
+  // The Forged Transfer does not free you. It buys turns, which is a
+  // different resource: it is the item that turns a hopeless cell into a
+  // rendezvous, giving a companion time to cross the yard or a flare time to
+  // pull the guard off you. Resets rather than adds, so it can't be stacked
+  // into an indefinite stay.
+  if (kind === ITEM_KINDS.TRANSFER) {
+    consume();
+    p.custody = CUSTODY_TURNS;
+    logMsg(game, `Forged papers change hands — Prisoner ${p.id + 1}'s processing resets to ${CUSTODY_TURNS} turns.`);
+    return { ok: true, event: "transfer", custody: p.custody };
+  }
+
+  // The Flare answers the posted guard. It is thrown, so unlike every other
+  // world-acting item it still works from inside a cell — that is the point.
+  // It drags a whole quadrant's guards onto one tile and costs them their
+  // next move, which is exactly long enough to struggle out from under one.
+  if (kind === ITEM_KINDS.FLARE) {
+    const target = typeof arg === "number" ? distractTarget(game, p, arg) : arg;
+    const tx = target && target.x;
+    const ty = target && target.y;
+    if (!Number.isInteger(tx) || !Number.isInteger(ty)) return { ok: false, reason: "no-target" };
+    if (tileAt(game, tx, ty) !== TILE.FLOOR) return { ok: false, reason: "bad-target" };
+    // Same "not at your feet" rule as the Distraction, and for a sharper
+    // reason here: the flare MOVES guards to the tile it lands on, so a
+    // point-blank throw would drag the squad onto you instead of off you.
+    if (Math.max(Math.abs(tx - p.x), Math.abs(ty - p.y)) < 2) return { ok: false, reason: "too-close" };
+    const quad = quadrantOf(game, tx, ty);
+    consume();
+    addNoise(game, tx, ty, "decoy");
+    let pulled = 0;
+    for (const g of game.watcher.guards) {
+      if (g.quadrant !== quad) continue;
+      g.x = tx;
+      g.y = ty;
+      g.stunnedTurns = 1; // loses its next move, whether posted or hunting
+      pulled++;
+    }
+    logMsg(game, pulled
+      ? `A flare goes up — ${pulled} guard${pulled === 1 ? "" : "s"} break off toward the light.`
+      : `A flare goes up over the ${DIRS[quad]} quadrant. Nothing answers it.`);
+    return { ok: true, event: "flare", x: tx, y: ty, pulled };
+  }
 
   if (kind === ITEM_KINDS.MUFFLE) {
     if (p.muffled) return { ok: false, reason: "already-muffled" };
@@ -544,6 +721,7 @@ export function breakWindow(game, dir) {
   }
   const p = game.prisoners[game.activePrisoner];
   if (!p.alive || p.escaped) return { ok: false, reason: "inactive" };
+  if (p.custody) return { ok: false, reason: "held" };
   if (p.mp <= 0) return { ok: false, reason: "no-mp" };
 
   const { dx, dy } = DIR_VEC[dir];
@@ -567,6 +745,33 @@ export function breakWindow(game, dir) {
 export function endPrisonerTurn(game) {
   if (game.turn !== "Prisoner") return { ok: false };
   const p = game.prisoners[game.activePrisoner];
+
+  // A prisoner who spent this turn walking may have walked past a cell. Their
+  // move is finished and committed, so this is the moment to check reach —
+  // doing it per-step would let a rescuer free someone in passing without
+  // ending their turn anywhere near them.
+  resolveRescues(game, p);
+
+  // The processing clock. It ticks on the held prisoner's OWN turn, so three
+  // turns means three of their turns — three real chances to act — regardless
+  // of how many companions are cycling in between.
+  if (p.custody > 0) {
+    p.custody -= 1;
+    if (p.custody <= 0) {
+      p.custody = 0;
+      p.alive = false;
+      logMsg(game, `Prisoner ${p.id + 1} is processed. They do not come back.`);
+    } else {
+      logMsg(game, `Prisoner ${p.id + 1}: ${p.custody} turn${p.custody === 1 ? "" : "s"} before processing.`);
+    }
+    p.struggledThisTurn = false;
+    game.turn = "Watcher";
+    game.watcher.rotatedThisTurn = false;
+    checkEndConditions(game);
+    return { ok: true, held: true };
+  }
+  p.struggledThisTurn = false;
+
   const dist =
     Math.abs(p.x - p.startTurnPos.x) + Math.abs(p.y - p.startTurnPos.y);
   // Moving 2+ tiles this turn reveals the tile the prisoner STARTED on —
@@ -793,6 +998,14 @@ export function moveGuards(game) {
   for (const guard of w.guards) {
     guard.turnsActive = (guard.turnsActive || 0) + 1;
 
+    // Flared: dragged to the light and blinded for a turn. Costs no action
+    // points — the squad is not doing anything, and charging them for being
+    // fooled would make the Flare strictly better than it should be.
+    if (guard.stunnedTurns > 0) {
+      guard.stunnedTurns -= 1;
+      continue;
+    }
+
     // Freshest noise in this guard's quadrant: ttl first (an older sound has
     // decayed), then `seq` to order sounds made in the same turn — without
     // that second key this degenerates to "whichever was pushed first".
@@ -805,6 +1018,21 @@ export function moveGuards(game) {
         bestSeq = seq;
         target = n;
       }
+    }
+
+    // Standing watch. A guard already within reach of someone in custody has
+    // a better job than chasing the next noise: staying put makes every
+    // struggle fail (see `struggle`), and it costs a point a turn, so the
+    // Watcher is really choosing between holding this one and hunting the
+    // others. Skips the move AND the grab — there is nobody new to take.
+    const watching = game.prisoners.find(
+      (p) => p.alive && !p.escaped && p.custody &&
+        Math.max(Math.abs(guard.x - p.x), Math.abs(guard.y - p.y)) <= GUARD_SIGHT
+    );
+    if (watching) {
+      guard.ap -= 1;
+      if (guard.ap <= 0) { guard.ap = 0; guard.spent = true; }
+      continue;
     }
 
     // The deployment burst: for the first GUARD_DEPLOY_TURNS turns a guard
@@ -827,12 +1055,13 @@ export function moveGuards(game) {
     // No line-of-sight trace: at range 1 there is nothing to trace through,
     // which is the point of making them pawns rather than a second eye.
     for (const p of game.prisoners) {
-      if (!p.alive || p.escaped) continue;
+      if (!p.alive || p.escaped || p.custody) continue;
       if (guard.ap < GUARD_CAPTURE_COST) continue; // cannot afford the grab
       if (Math.max(Math.abs(guard.x - p.x), Math.abs(guard.y - p.y)) > GUARD_SIGHT) continue;
-      p.alive = false;
+      // Guards are physical, so the post-release grace does NOT protect from
+      // them — slipping your cuffs beside a guard should still be frightening.
+      seize(game, p, "guards");
       guard.ap -= GUARD_CAPTURE_COST;
-      logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
       break; // one grab per guard per turn — it costs the same points either way
     }
 
@@ -894,9 +1123,14 @@ export function watcherScan(game, difficulty = "medium") {
   let caught = null;
   for (const p of game.prisoners) {
     if (!p.alive || p.escaped) continue;
+    if (p.custody) continue; // already in a cell; the eye has nothing left to find
+    // Just out of custody: the eye that took them is usually still pointed at
+    // the tile it took them on, so without this the reprieve would end on the
+    // very next scan and mean nothing.
+    if (game.round <= p.graceUntilRound) continue;
     if (!inGaze(game, dir, p.x, p.y)) continue;
     if (isExposed(game, p.x, p.y, difficulty)) {
-      p.alive = false;
+      seize(game, p, "gaze");
       caught = p;
       // Where and when the gaze took someone. PUBLIC by construction — the
       // capture is announced to everyone — and it is the strongest honest

@@ -154,6 +154,38 @@ const read = () =>
   check(!/armed/i.test(cancelled.hint), "pressing it again cancels and restores the normal hint");
 }
 
+// ---- 5b. An UNTARGETED item fires; it does not sit there armed ------------
+// Found by playing it: `armItemSlot` auto-fired on a hardcoded
+// `kind === MUFFLE || kind === FEATHER`, so the two new untargeted custody
+// items armed instead — "Shim armed — arrows to aim it", waiting forever for
+// a direction a Shim has no use for. Every untargeted item, not a list of the
+// ones that existed when the branch was written.
+{
+  for (const kind of Object.values(ITEM_KINDS)) {
+    if (ITEM_INFO[kind].targeted) continue;
+    const held = !!ITEM_INFO[kind].heldOnly;
+    await page.evaluate(([kind, held]) => {
+      const g = window.__opticon.game;
+      g.turn = "Prisoner";
+      g.activePrisoner = 0;
+      g.prisoners[0].items = [kind];
+      g.prisoners[0].custody = held ? 3 : 0;
+      g.gazeRevealedForRound = null;
+    }, [kind, held]);
+    await page.waitForTimeout(300);
+    await page.keyboard.press("Digit1");
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      items: window.__opticon.game.prisoners[0].items.length,
+      hint: document.getElementById("hint")?.textContent || "",
+    }));
+    const info = ITEM_INFO[kind];
+    check(after.items === 0, `${info.icon} ${info.label}: pressing it spends it`);
+    check(!/armed/i.test(after.hint), `${info.icon} ${info.label}: and never waits for a direction it cannot use`);
+  }
+  await page.evaluate(() => { window.__opticon.game.prisoners[0].custody = 0; });
+}
+
 // ---- 6. The caption follows the gamepad's selected slot -------------------
 // On a pad there is no pointer, so the highlighted chip is the only "which one
 // am I about to use" signal — the caption has to track it.

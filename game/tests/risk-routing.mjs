@@ -98,9 +98,23 @@ const world = (i, n = 3) => {
 {
   const diff = "hard";
   const orig = PRISONER_SKILL[diff].riskAversion;
+  // Tempo is measured as ROUNDS TAKEN BY PRISONERS WHO ACTUALLY GOT OUT.
+  //
+  // Two earlier proxies were both wrong, in instructive ways:
+  //  * rounds-to-game-end broke when capture became custody (CUSTODY_TURNS):
+  //    a reckless prisoner who gets seized now spends three extra rounds in a
+  //    cell instead of leaving the board, so recklessness inflates the round
+  //    count by the very mechanism that punishes it. Read 17.4 vs 17.3.
+  //  * tiles-per-turn cannot show it either: MP_PER_TURN is 3 and both
+  //    settings spend nearly all of it every turn (2.90 vs 2.91). A detour is
+  //    not slower per turn — it is slower per JOURNEY.
+  // Time-to-exit is the thing a player would actually feel, and a prisoner
+  // still in a cell contributes nothing to it either way.
   const measure = (aversion) => {
     PRISONER_SKILL[diff].riskAversion = aversion;
-    let stood = 0, exposed = 0, rounds = 0, games = 0;
+    let stood = 0, exposed = 0;
+    const escapeRounds = [];
+    const seenEscaped = new Set();
     for (let i = 0; i < 60; i++) {
       const { g } = world(i);
       const rng = mul(i + 1);
@@ -108,7 +122,14 @@ const world = (i, n = 3) => {
       while (!isOver(g) && guard-- > 0) {
         const p = g.prisoners[g.activePrisoner];
         prisonerAITurn(g, rng, diff);
-        if (p.alive && !p.escaped) {
+        for (const q of g.prisoners) {
+          const key = `${i}:${q.id}`;
+          if (q.escaped && !seenEscaped.has(key)) {
+            seenEscaped.add(key);
+            escapeRounds.push(g.round);
+          }
+        }
+        if (p.alive && !p.escaped && !p.custody) {
           stood++;
           if (isLit(g, p.x, p.y) && inWatcherGaze(g, g.watcher.facing, p.x, p.y)) exposed++;
         }
@@ -118,21 +139,24 @@ const world = (i, n = 3) => {
         watcherScan(g, diff);
         endWatcherTurn(g);
       }
-      rounds += g.round; games++;
     }
-    return { exposed: (exposed / stood) * 100, rounds: rounds / games };
+    return {
+      exposed: (exposed / stood) * 100,
+      toExit: escapeRounds.reduce((a, b) => a + b, 0) / Math.max(escapeRounds.length, 1),
+      escapes: escapeRounds.length,
+    };
   };
   const reckless = measure(0);
   const careful = measure(9);
   PRISONER_SKILL[diff].riskAversion = orig;
-  console.log(`    reckless(0): ${reckless.exposed.toFixed(1)}% turns ended exposed, ${reckless.rounds.toFixed(1)} rounds`);
-  console.log(`    careful(9):  ${careful.exposed.toFixed(1)}% turns ended exposed, ${careful.rounds.toFixed(1)} rounds`);
+  console.log(`    reckless(0): ${reckless.exposed.toFixed(1)}% turns ended exposed, ${reckless.toExit.toFixed(1)} rounds to the gate (${reckless.escapes} escapes)`);
+  console.log(`    careful(9):  ${careful.exposed.toFixed(1)}% turns ended exposed, ${careful.toExit.toFixed(1)} rounds to the gate (${careful.escapes} escapes)`);
   check(careful.exposed < reckless.exposed * 0.8,
     `caution measurably reduces time spent watched (${reckless.exposed.toFixed(1)}% -> ${careful.exposed.toFixed(1)}%)`);
   // And it must COST something, or it is not a trade and there is no
   // discipline to be had — a free safety is just a better move.
-  check(careful.rounds > reckless.rounds,
-    `and it costs tempo (${reckless.rounds.toFixed(1)} -> ${careful.rounds.toFixed(1)} rounds)`);
+  check(careful.toExit > reckless.toExit,
+    `and it costs tempo (${reckless.toExit.toFixed(1)} -> ${careful.toExit.toFixed(1)} rounds to reach the gate)`);
 }
 
 // ---- 5. The tiers are ordered ---------------------------------------------
