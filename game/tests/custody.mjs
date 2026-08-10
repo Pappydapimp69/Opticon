@@ -8,7 +8,8 @@
 //
 // The traps this file is built around:
 //  * a reprieve that hands you straight back on the very next scan is not a
-//    reprieve (RELEASE_GRACE_ROUNDS);
+//    reprieve, and it has to last until you have actually HAD a turn
+//    (RELEASE_GRACE_TURNS) — counted in your own turns, not in rounds;
 //  * three turns must mean three of YOUR turns, not three of anyone's;
 //  * `alive` stopped meaning "can act", so every gate that used to read it has
 //    to read custody as well or a cuffed prisoner can still walk out;
@@ -18,7 +19,7 @@ import { generateMap, MAP_DEFAULTS, ITEM_KINDS } from "../src/map.js";
 import {
   createGame, endPrisonerTurn, endWatcherTurn, isOver, watcherScan, moveGuards,
   moveActivePrisoner, breakWindow, useItem, struggle, guardOver,
-  CUSTODY_TURNS, STRUGGLE_CHANCE, RELEASE_GRACE_ROUNDS,
+  CUSTODY_TURNS, STRUGGLE_CHANCE, RELEASE_GRACE_TURNS, inWatcherGaze, isLit,
   GUARD_ACTION_POINTS, GUARD_CAPTURE_COST, ROUND_LIMIT,
   distractTarget, quadrantOf,
 } from "../src/rules.js";
@@ -269,23 +270,66 @@ section("capture seizes; the clock is what kills");
   g.turn = "Prisoner";
   const r = struggle(g, () => 0);
   check(r.freed, "they work loose");
-  check(p.graceUntilRound === g.round + RELEASE_GRACE_ROUNDS,
-    `and carry ${RELEASE_GRACE_ROUNDS} round of grace (through round ${p.graceUntilRound})`);
+  check(p.gazeGraceTurns > 0, "and carry grace out of the cell");
   g.turn = "Watcher";
   const again = watcherScan(g);
   check(!again.caught && !p.custody,
     "the very next scan, from the same gaze on the same tile, cannot re-take them");
-  // ...and the grace is one round, not immunity.
-  g.round = p.graceUntilRound + 1;
-  g.turn = "Watcher";
-  const third = watcherScan(g);
-  check(!!third.caught && p.custody === CUSTODY_TURNS, "a round later the eye can take them again");
+}
+
+// The whole point of the reprieve, stated the way the rule is stated: struggle
+// free and you GET YOUR TURN. Asserting the old formula
+// (`graceUntilRound === round + RELEASE_GRACE_ROUNDS`) could never have caught
+// this, because the formula was the bug. A round ticks once per PRISONER turn,
+// so with three prisoners alive the window closed on the scan immediately
+// BEFORE the freed prisoner's own next turn — reproduced at round 4 of 4. It
+// scaled with party size and disappeared entirely at one prisoner.
+//
+// So this drives real turns and asks the only question that matters: when P0's
+// turn comes back around, are they standing on the board?
+{
+  const g = build({ humanPrisoner: 0 });
+  g.watcher.guards = []; // isolate the gaze from the guards
+  const p = g.prisoners[0];
+  const c = g.map.center;
+
+  // Park P0 where the gaze will genuinely take them: north wedge, and lit.
+  let spot = null;
+  for (let r = 1; r < 14 && !spot; r++)
+    for (let dx = -r; dx <= r && !spot; dx++) {
+      const x = c.x + dx, y = c.y - r;
+      if (g.map.tiles[y]?.[x] === 0 && inWatcherGaze(g, 0, x, y) && isLit(g, x, y)) spot = { x, y };
+    }
+  check(!!spot, "found a lit tile inside the gaze to run the reprieve on");
+  p.x = spot.x; p.y = spot.y;
+  for (const o of g.prisoners.slice(1)) { o.x = c.x; o.y = c.y + 10; }
+
+  p.custody = CUSTODY_TURNS;
+  check(struggle(g, () => 0).freed, "P0 works loose");
+
+  // Cycle the table until it is P0's turn again.
+  let reachedOwnTurn = false;
+  for (let i = 0; i < 6 && !reachedOwnTurn; i++) {
+    endPrisonerTurn(g);
+    watcherScan(g);
+    endWatcherTurn(g);
+    if (g.activePrisoner === 0) reachedOwnTurn = true;
+  }
+  check(reachedOwnTurn && !p.custody,
+    "a prisoner who breaks free is still free when their own next turn arrives");
+  check(p.mp > 0, "and has the move points to actually play it");
+
+  // And it is a reprieve, not immunity: one turn, then the eye can have them.
+  endPrisonerTurn(g);
+  const after = watcherScan(g);
+  check(!!after.caught && p.custody === CUSTODY_TURNS,
+    "once that turn is spent the gaze can take them again");
 }
 {
   // Guards are physical: the grace does not stop them.
   const g = build();
   const p = g.prisoners[0];
-  p.graceUntilRound = g.round + 5;
+  p.gazeGraceTurns = 5;
   g.watcher.guards = [{ id: 1, x: p.x + 1, y: p.y, quadrant: 0, ap: GUARD_ACTION_POINTS, turnsActive: 0, spent: false }];
   g.noise = [];
   moveGuards(g);
