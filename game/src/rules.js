@@ -132,6 +132,12 @@ export function createGame(map, opts = {}) {
     map,
     prisoners,
     activePrisoner: 0,
+    // Index of the prisoner a HUMAN is playing, or null when every prisoner is
+    // AI (the human is in the Watcher seat). This is what makes an escape
+    // *yours*: see checkEndConditions. Without it the rules could only ask
+    // "did anybody get out", which handed the human a win whenever an AI
+    // companion happened to walk through the gate first.
+    humanPrisoner: opts.humanPrisoner ?? null,
     // Resolved DISPATCH strength tier (see DISPATCH_TIER below). Resolved
     // ONCE here rather than re-derived per call: DISPATCH is a Watcher-only
     // tool used by exactly one side per game, but which raw difficulty value
@@ -385,7 +391,10 @@ export function moveActivePrisoner(game, dir) {
       game.takenItems.add(ny * game.map.size + nx);
       p.items.push(entry.kind);
       picked = entry.kind;
-      logMsg(game, `Prisoner picks up a ${ITEM_INFO[entry.kind].label}.`);
+      // The log line carries the RULE, not just the noun. Pickup is automatic,
+      // so this is the moment the player first learns the thing exists, and
+      // "picks up Cutters" tells them nothing they can act on.
+      logMsg(game, `Picked up ${ITEM_INFO[entry.kind].icon} ${ITEM_INFO[entry.kind].label} — ${ITEM_INFO[entry.kind].blurb}`);
       event = "item-pickup";
     } else if (entry) {
       logMsg(game, `Hands full — left the ${ITEM_INFO[entry.kind].label} behind.`);
@@ -991,19 +1000,46 @@ function logMsg(game, msg, opts = {}) {
   if (game.log.length > 60) game.log.pop();
 }
 
+// A prisoner's result is their OWN fate, not their group's.
+//
+// This used to end the game the moment `prisoners.some(p => p.escaped)` was
+// true, which meant an AI companion reaching the gate handed the human a win
+// they had not played for. Companions are meant to be cover and company, not a
+// bus out. So when a human is holding one of the prisoners (`humanPrisoner`),
+// that prisoner's fate alone decides the game: they get out and it's a win,
+// they get taken and it's a loss, and what the rest of the group managed is
+// colour on the end screen rather than the verdict.
+//
+// With no human prisoner — the human is in the Watcher seat — there is no
+// individual fate to grade against, so the rule stays the institutional one:
+// the Watcher has to run the whole table, and a single escape is a failure.
 function checkEndConditions(game) {
+  const human = game.humanPrisoner == null ? null : game.prisoners[game.humanPrisoner];
   const anyEscaped = game.prisoners.some((p) => p.escaped);
-  const allDown = game.prisoners.every((p) => !p.alive || p.escaped);
   const anyAliveInPlay = game.prisoners.some((p) => p.alive && !p.escaped);
 
-  if (anyEscaped) {
+  if (human) {
+    if (human.escaped) {
+      game.status = "escaped";
+      game.winner = "Prisoner";
+    } else if (!human.alive) {
+      game.status = "captured";
+      game.winner = "Watcher";
+    }
+  } else if (anyEscaped) {
     game.status = "escaped";
     game.winner = "Prisoner";
-  } else if (!anyAliveInPlay && allDown) {
-    game.status = "captured";
-    game.winner = "Watcher";
-  } else if (game.round > ROUND_LIMIT) {
-    // Time ran out: nobody reached the gate, so the institution holds.
+  }
+
+  if (game.status === "playing" && !anyAliveInPlay) {
+    // Nobody left on the board. Reachable only with no human prisoner, since
+    // a human's own exit or capture is settled above.
+    game.status = anyEscaped ? "escaped" : "captured";
+    game.winner = anyEscaped ? "Prisoner" : "Watcher";
+  }
+
+  if (game.status === "playing" && game.round > ROUND_LIMIT) {
+    // Time ran out on whoever is still inside, so the institution holds.
     game.status = "captured";
     game.winner = "Watcher";
     game.timedOut = true;

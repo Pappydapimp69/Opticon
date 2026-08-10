@@ -459,6 +459,24 @@ html, body {
 
 /* Item/skill name, always visible — a title= tooltip only ever reached the
    one input scheme (mouse) that needed the help least. */
+/* What the highlighted item does. Sits under the chips rather than inside one:
+   a rule is a sentence and a chip is 54px wide, and the caption has to stay
+   readable on a phone where the chip labels are already down to 9px. */
+.item-caption {
+  max-width: min(460px, 84vw);
+  margin-top: -4px; /* the dock column's 10px gap is too much under the chips */
+  padding: 5px 9px; border-radius: 9px;
+  background: rgba(12, 17, 30, 0.82); border: 1px solid #2f3c5c;
+  color: #b9c6e4; font-size: 11px; line-height: 1.35; text-align: center;
+  pointer-events: none;
+}
+.item-caption.empty { display: none; }
+.item-caption b { color: #dce6ff; font-weight: 600; }
+.item-caption i { color: #ffc75a; font-style: normal; }
+@media (max-width: 560px) {
+  .item-caption { font-size: 10px; padding: 4px 7px; max-width: 92vw; }
+}
+
 .item-chip .iname {
   font-size: 9px; letter-spacing: .02em; white-space: nowrap;
   color: #93a4c8; pointer-events: none;

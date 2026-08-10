@@ -162,10 +162,24 @@ export class UI {
         ? "Time ran out. Nobody reached the gate — the panopticon holds."
         : "The Watcher's gaze found you. The panopticon holds.";
     const roundWord = game.round === 1 ? "round" : "rounds";
+    // What the REST of the group managed. Never the verdict when a human is
+    // holding a prisoner — that is decided by their own fate — but it is the
+    // difference between walking out alone and walking out last, so it is
+    // worth a line.
+    const group = game.prisoners.length > 1
+      ? (() => {
+          const out = game.prisoners.filter((p) => p.escaped).length;
+          const taken = game.prisoners.filter((p) => !p.alive).length;
+          const n = game.prisoners.length;
+          if (out === n) return `All ${n} of you made it out.`;
+          if (out === 0) return taken === n ? `The whole group was taken.` : `Nobody else reached the gate.`;
+          return `${out} of ${n} got out${taken ? `; ${taken} taken` : ""}.`;
+        })()
+      : "";
     const stats = `${flavor} (${game.round} ${roundWord}${meta.difficulty ? `, ${meta.difficulty}` : ""})`;
     // The running record is the reason to press Play again, so it belongs on
     // the screen that offers that button — not only back on the menu.
-    this.el.overlayText.textContent = meta.record ? `${stats}\n${meta.record}` : stats;
+    this.el.overlayText.textContent = [stats, group, meta.record].filter(Boolean).join("\n");
   }
 }
 
