@@ -38,8 +38,24 @@ export const SKILL_INFO = Object.freeze({
   [SKILLS.LOCK]: { label: "Remote lock", icon: "🔒", cooldown: 4 },
   [SKILLS.DISPATCH]: { label: "Dispatch guards", icon: "🚨", cooldown: 4 },
 });
-export const GUARD_SPEED = 5; // baseline (medium-tier) tiles/turn — faster than a prisoner's MP_PER_TURN
-export const GUARD_LIFESPAN = 6; // baseline (medium-tier) turns a dispatched pair searches before recalled
+// ---- Guards: pawns on an action bar --------------------------------------
+// Guards were the game and shouldn't have been: measured over 300 games/tier,
+// they made 83% of all captures on hard and 75% on medium, against the tower
+// gaze's 17%/25% (Tension T28). They were fast (5-6 tiles/turn), long-lived,
+// and saw 4-6 tiles down a line — a patrol that outran and out-saw the
+// mechanic the game is named after.
+//
+// They are pawns now. One square of sight in every direction, and a finite
+// ACTION BAR rather than a lifespan clock: every step spends a point, a
+// capture spends three, and at zero they are recalled the following turn. The
+// first two turns after deployment buy a burst — up to 3 squares for a single
+// point — so a dispatch still arrives somewhere, and after that they plod one
+// square at a time. A squad is a spent resource with a shape, not a timer.
+export const GUARD_ACTION_POINTS = 7; // the whole bar, per guard
+export const GUARD_DEPLOY_TURNS = 2;  // turns of burst movement after dispatch
+export const GUARD_DEPLOY_STEPS = 3;  // squares that burst buys, for 1 point
+export const GUARD_CAPTURE_COST = 3;  // points a capture spends
+export const GUARD_SIGHT = 1;         // squares seen in EVERY direction
 // Hard cap on turns. A game with no cap can in principle run forever
 // against a passive human Prisoner, and the Watcher had no win condition of
 // last resort. Chosen from the balance sim's own distribution rather than
@@ -658,10 +674,13 @@ export function useSkill(game, skill, arg) {
     const id1 = w._guardSeq;
     w._guardSeq += 1;
     const id2 = w._guardSeq;
-    game.watcher.guards.push(
-      { id: id1, x: post.x, y: post.y, quadrant: arg, life: params.lifespan },
-      { id: id2, x: post.x, y: post.y, quadrant: arg, life: params.lifespan }
-    );
+    const fresh = (id) => ({
+      id, x: post.x, y: post.y, quadrant: arg,
+      ap: params.actionPoints,   // the action bar
+      turnsActive: 0,            // drives the deployment burst window
+      spent: false,              // bar hit zero — recalled NEXT turn, not now
+    });
+    game.watcher.guards.push(fresh(id1), fresh(id2));
     spend(params.cooldown);
     logMsg(game, `Guards dispatched to the ${DIRS[arg]} quadrant.`);
     return { ok: true, event: "dispatch", quadrant: arg };
@@ -712,15 +731,13 @@ export const GUARD_SIGHT_RANGE = 5;
 // weaker guards for a human Watcher, stronger for an AI one) is resolved
 // once in main.js and stored pre-inverted on game.dispatchTier, so
 // everything reading this table just gets the right answer for free.
+// Only the action bar and the cooldown are tiered now. Sight is fixed at one
+// square for every tier: it is what makes a guard a pawn rather than a second
+// eye, so it is not a difficulty knob.
 export const DISPATCH_TIER = Object.freeze({
-  easy: { speed: 4, lifespan: 5, cooldown: 5, sightRange: 4 },
-  medium: {
-    speed: GUARD_SPEED,
-    lifespan: GUARD_LIFESPAN,
-    cooldown: SKILL_INFO[SKILLS.DISPATCH].cooldown,
-    sightRange: GUARD_SIGHT_RANGE,
-  },
-  hard: { speed: 6, lifespan: 7, cooldown: 3, sightRange: 6 },
+  easy: { actionPoints: 5, cooldown: 5 },
+  medium: { actionPoints: GUARD_ACTION_POINTS, cooldown: SKILL_INFO[SKILLS.DISPATCH].cooldown },
+  hard: { actionPoints: 9, cooldown: 3 },
 });
 
 export function dispatchParams(game) {
@@ -759,8 +776,14 @@ export function hasLineOfSight(game, ax, ay, bx, by, maxRange = GUARD_SIGHT_RANG
 export function moveGuards(game) {
   const w = game.watcher;
   const params = dispatchParams(game);
+  // Recall first: anything whose bar emptied LAST turn goes now. Doing it at
+  // the top rather than the bottom is what makes "recalled the next turn"
+  // literal — a spent guard stands there for exactly one visible turn.
+  w.guards = w.guards.filter((g) => !g.spent);
+
   for (const guard of w.guards) {
-    guard.life -= 1;
+    guard.turnsActive = (guard.turnsActive || 0) + 1;
+
     // Freshest noise in this guard's quadrant: ttl first (an older sound has
     // decayed), then `seq` to order sounds made in the same turn — without
     // that second key this degenerates to "whichever was pushed first".
@@ -774,23 +797,41 @@ export function moveGuards(game) {
         target = n;
       }
     }
-    if (target) {
+
+    // The deployment burst: for the first GUARD_DEPLOY_TURNS turns a guard
+    // covers up to GUARD_DEPLOY_STEPS squares for a single point. After that
+    // it is a pawn — one square, one point.
+    const bursting = guard.turnsActive <= GUARD_DEPLOY_TURNS;
+    const maxSteps = bursting ? GUARD_DEPLOY_STEPS : 1;
+    if (target && guard.ap > 0) {
       const path = bfsPath(game.map, guard.x, guard.y, target.x, target.y, null);
       if (path && path.length > 1) {
-        const steps = Math.min(params.speed, path.length - 1);
+        const steps = Math.min(maxSteps, path.length - 1);
         guard.x = path[steps].x;
         guard.y = path[steps].y;
+        // A burst is one point for the whole move; otherwise a point per square.
+        guard.ap -= bursting ? 1 : steps;
       }
     }
+
+    // Sight is one square in every direction — adjacent, including diagonals.
+    // No line-of-sight trace: at range 1 there is nothing to trace through,
+    // which is the point of making them pawns rather than a second eye.
     for (const p of game.prisoners) {
       if (!p.alive || p.escaped) continue;
-      if (hasLineOfSight(game, guard.x, guard.y, p.x, p.y, params.sightRange)) {
-        p.alive = false;
-        logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
-      }
+      if (guard.ap < GUARD_CAPTURE_COST) continue; // cannot afford the grab
+      if (Math.max(Math.abs(guard.x - p.x), Math.abs(guard.y - p.y)) > GUARD_SIGHT) continue;
+      p.alive = false;
+      guard.ap -= GUARD_CAPTURE_COST;
+      logMsg(game, `Guards corner Prisoner ${p.id + 1}!`);
+      break; // one grab per guard per turn — it costs the same points either way
+    }
+
+    if (guard.ap <= 0) {
+      guard.ap = 0;
+      guard.spent = true;
     }
   }
-  w.guards = w.guards.filter((g) => g.life > 0);
   checkEndConditions(game);
 }
 

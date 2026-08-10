@@ -4,7 +4,7 @@
 
 import * as THREE from "../lib/three.module.js";
 import { TILE, OBJ, DIR_VEC } from "./map.js";
-import { computeFoV, inWatcherGaze, isLit, VIS } from "./rules.js";
+import { computeFoV, inWatcherGaze, isLit, VIS, GUARD_ACTION_POINTS } from "./rules.js";
 
 const COLORS = {
   bg: 0x05070d,
@@ -792,6 +792,13 @@ export class Renderer {
       m.group.position.x += (tx - m.group.position.x) * k;
       m.group.position.z += (tz - m.group.position.z) * k;
       m.body.rotation.y = this.time * 3; // spinning "on alert" tell
+      // Action bar as a visible tell: a guard running low burns dimmer and
+      // spins its ring tighter, so "this one is nearly recalled" is readable
+      // from the board instead of only from the rules.
+      const fuel = Math.max(0, Math.min(1, guard.ap / GUARD_ACTION_POINTS));
+      m.ring.material.opacity = 0.18 + 0.42 * fuel;
+      m.ring.scale.setScalar(0.7 + 0.3 * fuel);
+      m.light.intensity = 0.2 + 0.55 * fuel;
     }
     for (const [id, m] of this.guardMeshes) {
       if (liveIds.has(id)) continue;

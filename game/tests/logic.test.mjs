@@ -32,6 +32,8 @@ import {
   hasLineOfSight,
   moveGuards,
   GUARD_SIGHT_RANGE,
+  GUARD_ACTION_POINTS,
+  GUARD_CAPTURE_COST,
   quadrantOf,
   addNoise,
 } from "../src/rules.js";
@@ -951,26 +953,49 @@ section("guard line of sight");
   ok(hasLineOfSight(g, cx, y, cx, y), "same tile is always in sight (distance 0)");
 }
 
-section("dispatched guards capture on sight, not just same-tile contact");
+section("dispatched guards are pawns: one square of sight, paid for in action points");
 {
+  // Guards used to capture down an unobstructed sightline 4-6 tiles long,
+  // which made them a second eye rather than a patrol — measured at 83% of
+  // all captures on hard against the tower gaze's 17% (Tension T28). They now
+  // see exactly one square in EVERY direction, diagonals included, and a grab
+  // spends GUARD_CAPTURE_COST of a finite action bar.
   const map = generateMap(31);
   const { y } = map.center;
   const cx = map.center.x;
-  const g = createGame(map, { prisoners: [{ x: cx, y }] });
-  clearStrip(g, y, cx - 4, cx + 4);
-  ok(g.prisoners[0].alive, "sanity: prisoner alive before any guard acts");
 
-  g.map.tiles[y][cx - 1] = TILE.WALL;
-  g.map.objects[y][cx - 1] = OBJ.NONE;
-  g.watcher.guards = [{ id: 2, x: cx - 3, y, quadrant: 0, life: GUARD_SIGHT_RANGE + 5 }];
-  moveGuards(g);
-  ok(g.prisoners[0].alive, "a wall between guard and prisoner prevents capture");
+  const withGuard = (gx, gy, ap = GUARD_ACTION_POINTS) => {
+    const g = createGame(map, { prisoners: [{ x: cx, y }] });
+    clearStrip(g, y, cx - 4, cx + 4);
+    g.noise = [];
+    g.watcher.guards = [{ id: 1, x: gx, y: gy, quadrant: 0, ap, turnsActive: 0, spent: false }];
+    return g;
+  };
 
-  g.map.tiles[y][cx - 1] = TILE.FLOOR;
-  g.map.objects[y][cx - 1] = OBJ.NONE;
-  g.watcher.guards = [{ id: 3, x: cx - 3, y, quadrant: 0, life: GUARD_SIGHT_RANGE + 5 }];
+  let g = withGuard(cx - 3, y);
   moveGuards(g);
-  ok(!g.prisoners[0].alive, "a clear line within range captures without same-tile contact");
+  ok(g.prisoners[0].alive, "three squares away cannot capture, clear line or not");
+
+  g = withGuard(cx - 2, y);
+  moveGuards(g);
+  ok(g.prisoners[0].alive, "two squares away cannot capture");
+
+  g = withGuard(cx - 1, y);
+  moveGuards(g);
+  ok(!g.prisoners[0].alive, "an adjacent guard captures");
+
+  g = withGuard(cx - 1, y - 1);
+  moveGuards(g);
+  ok(!g.prisoners[0].alive, "sight is one square in EVERY direction — diagonals count");
+
+  g = withGuard(cx - 1, y);
+  moveGuards(g);
+  ok(g.watcher.guards[0].ap === GUARD_ACTION_POINTS - GUARD_CAPTURE_COST,
+    `a capture spends ${GUARD_CAPTURE_COST} action points (got ${g.watcher.guards[0].ap})`);
+
+  g = withGuard(cx - 1, y, GUARD_CAPTURE_COST - 1);
+  moveGuards(g);
+  ok(g.prisoners[0].alive, "a guard that cannot afford the grab does not make it");
 }
 
 section("a decoy thrown after your own footsteps still pulls the guards");
@@ -1007,7 +1032,7 @@ section("a decoy thrown after your own footsteps still pulls the guards");
       addNoise(g, decoy.x, decoy.y, "decoy");
       addNoise(g, p.x, p.y, "move");
     }
-    g.watcher.guards = [{ id: 1, x: guardAt.x, y: guardAt.y, quadrant: quadrantOf(g, decoy.x, decoy.y), life: 5 }];
+    g.watcher.guards = [{ id: 1, x: guardAt.x, y: guardAt.y, quadrant: quadrantOf(g, decoy.x, decoy.y), ap: 5, turnsActive: 0, spent: false }];
     moveGuards(g);
     return { g, p, guard: g.watcher.guards[0] || { ...guardAt } };
   }
