@@ -69,11 +69,59 @@ and now resolves through the live camera, from the prisoner's own tile.
 
 ## New Exploration
 
-A **mutation audit** of the suite: deliberately break a rule, run everything,
-record whether anything noticed. Prompted by finding, one at a time, that
-`smoke` asserted nothing about its own subject and `fair-information` accepted
-`positionMoved || beliefMoved` as proof that bluffing "reaches" a tier. Finding
-holes individually is not a method; breaking things on purpose is.
+**E7 · experiment · a mutation audit as a lens on where coverage actually is · live**
+
+Deliberately break one rule, run the whole suite, record whether anything
+noticed. Prompted by finding, one at a time, that `smoke` asserted nothing
+about its own subject and `fair-information` accepted `positionMoved ||
+beliefMoved` as proof that bluffing "reaches" a tier. Finding holes
+individually is not a method; breaking things on purpose is.
+
+Run twice against the same repo with different targets, because the first
+score is a claim about the targets, not about the suite:
+
+  * Round 1 — custody, guards, post-release grace: code written that week,
+    alongside tests written in the same sitting by the same hand. **1 survivor
+    of 12.**
+  * Round 2 — noise decay, field of view, lamp line-of-sight, door cost, gaze
+    geometry, exposure tiers, belt capacity, decoy range, the round limit:
+    the systems written earliest and touched least. **5 of 16.**
+
+Same suite, same day, five-fold difference. Coverage tracks recency, not
+importance.
+
+Three ways the exercise lied about itself, all worth designing against: a
+harness whose uncaught timeout crashed and was *scored* as "the mutation was
+caught"; a mutation silently skipped because its search string did not match,
+whose output line reads almost identically to a caught one; and assertions
+written against the constant they check (`ap === MAX - COST` holds for every
+COST including zero), which is what let the round-1 survivor through.
+
+Cost property worth keeping: with a runner that exits on first failure, a
+caught mutation costs seconds and only survivors pay the full runtime, so the
+bill is proportional to how bad the news is. The obstacle is that 16 mutations
+is still ~1h wall-clock, which is why it is not routine. Next step, not built:
+a fast pass over the node-only tests (which caught most of these in seconds)
+with the browser harnesses held back for survivors only.
+
+The refutation it produced is worth more than the fixes: **a surviving
+mutation is not automatically a coverage hole.** One survivor guarded a
+deadlock that a later change had already made impossible; the honest response
+was to document it as dead rather than write a test around it, since pinning a
+constant that provably does nothing converts dead code into frozen dead code.
+
+*Recorded here rather than in the Brain exploration store on purpose.* The
+`brain` CLI has `_push_local_ideas` and `_push_local_tension` but no
+`_push_local_exploration` — `ideas/exploration.md` is registered in
+`LOCAL_SEED` as a canon **mirror**, so `_local_proposal_files` skips it and
+nothing ever pushes from it. An exploration block dropped in as a standalone
+file is held instead, because the ideas pusher requires a `## [DOMAIN / ...]`
+header that a `### ` block does not have. `.brain/` is also gitignored, so an
+entry left there survives neither `sync` nor the container. The write-back
+table in `orchestration.md` routes experiment/synthesis to `exploration`; the
+tool currently has no path for it, so the durable home is this file. The
+transferable content is not lost either way — the method and the refutation
+are in the memory entry, and the unresolved cost problem is in T30.
 
 ## Graduation candidates
 
