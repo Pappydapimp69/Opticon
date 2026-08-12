@@ -38,10 +38,21 @@ const server = http.createServer((req, res) => {
   // active prisoner, handlePrisonerIntent ignores the keypress outright and
   // the walk never happens. That made this test fail about one run in three,
   // with the failure looking like a broken escape rather than a race.
-  await page.waitForFunction(() => {
+  const gotTurn = await page.waitForFunction(() => {
     const a = window.__opticon;
     return a && a.game && !a.aiThinking && a.game.turn === "Prisoner" && a.game.activePrisoner === 0;
-  }, null, { timeout: 20000 });
+  }, null, { timeout: 20000 }).then(() => true).catch(() => false);
+  if (!gotTurn) {
+    // Rare (~1 run in 30): the AI companions' turn cycle did not hand control
+    // back inside the budget. Uncaught, this threw out of the async IIFE — the
+    // run died with a bare stack trace AND leaked the browser and the http
+    // server, because nothing below the throw ever ran. It also polluted a
+    // mutation audit, which read the crash as "the mutation was caught".
+    // A harness that cannot set itself up must say so in its own voice.
+    console.log("SETUP FAILED: the human's prisoner never got the turn within 20s — not a feature failure");
+    await browser.close(); server.close();
+    process.exit(2);
+  }
 
   // Teleport the prisoner adjacent to the exit, facing it, then step in.
   //
@@ -151,4 +162,9 @@ const server = http.createServer((req, res) => {
   const ok = result.status === "escaped" && result.overlayVisible && /ESCAP/i.test(result.title) && errors.length === 0;
   console.log(ok ? "✓ escape end-screen verified" : "✗ escape verification failed");
   process.exit(ok ? 0 : 1);
-})();
+})().catch(async (e) => {
+  // Any unexpected throw still has to leave the machine clean, and has to be
+  // distinguishable from an honest red. Exit 3, never 1.
+  console.error("HARNESS ERROR:", e && e.message ? e.message : e);
+  process.exit(3);
+});
