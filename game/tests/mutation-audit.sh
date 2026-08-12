@@ -94,6 +94,85 @@ add "held-only items usable while free" \
     '  if (heldOnly && !p.custody) return { ok: false, reason: "only-in-custody" };' \
     "  // mutation: heldOnly gate removed"
 
+# ---- Round 2: the OLD core ------------------------------------------------
+# Round 1 above mutated custody, guards and grace — code written in the same
+# week as its own tests, by the same hand. It scored 1/12, which flattered the
+# suite. These target the systems written earliest and touched least, and they
+# scored 5 SURVIVORS out of 16. Coverage tracks how recently something was
+# written, not how important it is.
+# --- Core resources -------------------------------------------------------
+add "move points 3 -> 5" "game/src/rules.js" \
+  "export const MP_PER_TURN = 3;" "export const MP_PER_TURN = 5;"
+
+add "belt capacity 2 -> 4" "game/src/rules.js" \
+  "export const ITEM_CAP = 2; // carried at once — forces a real \"which do I keep\" choice" \
+  "export const ITEM_CAP = 4;"
+
+add "noise lingers 2 -> 6 turns" "game/src/rules.js" \
+  "export const NOISE_TTL = 2; // turns a noise marker persists for the Watcher" \
+  "export const NOISE_TTL = 6;"
+
+add "prisoner sight 5 -> 2 tiles" "game/src/rules.js" \
+  "export const FOV_RANGE = 5; // prisoner cardinal sight range (tiles)" \
+  "export const FOV_RANGE = 2;"
+
+add "decoy range 6 -> 1" "game/src/rules.js" \
+  "export const DISTRACT_RANGE = 6;" "export const DISTRACT_RANGE = 1;"
+
+add "round limit 90 -> 12" "game/src/rules.js" \
+  "export const ROUND_LIMIT = 90;" "export const ROUND_LIMIT = 12;"
+
+# --- Gaze geometry --------------------------------------------------------
+add "north gaze wedge inverted" "game/src/rules.js" \
+  "      return dy < 0 && Math.abs(dx) <= -dy; // North" \
+  "      return dy > 0 && Math.abs(dx) <= dy; // North (mutated)"
+
+add "gaze wedge 90deg -> whole halfplane" "game/src/rules.js" \
+  "      return dx > 0 && Math.abs(dy) <= dx; // East" \
+  "      return dx > 0; // East (mutated: no wedge)"
+
+# --- Light and line of sight ----------------------------------------------
+add "light ignores its own radius" "game/src/rules.js" \
+  "    if (d <= l.radius && lightReaches(game, l, x, y)) return true;" \
+  "    if (lightReaches(game, l, x, y)) return true;"
+
+add "light shines through walls" "game/src/rules.js" \
+  "    if (d <= l.radius && lightReaches(game, l, x, y)) return true;" \
+  "    if (d <= l.radius) return true;"
+
+add "switched-off lights still light" "game/src/rules.js" \
+  "    if (!game.lightState[l.group]) continue;" \
+  "    if (false) continue;"
+
+# --- Exposure -------------------------------------------------------------
+add "everything is exposed" "game/src/rules.js" \
+  "export function isExposed(game, x, y, difficulty) {
+  if (isLit(game, x, y)) return true;" \
+  "export function isExposed(game, x, y, difficulty) {
+  return true;
+  if (isLit(game, x, y)) return true;"
+
+add "easy tier now punishes noise like medium" "game/src/rules.js" \
+  '  if (difficulty === "easy") return false;' \
+  "  // mutation: easy no longer forgives noise"
+
+# --- Movement / world -----------------------------------------------------
+add "closed doors cost nothing to open" "game/src/rules.js" \
+  "    p.mp -= 1;
+    logMsg(game, \`Prisoner picks the lock — door opens.\`);" \
+  "    logMsg(game, \`Prisoner picks the lock — door opens.\`);"
+
+add "a plain move costs nothing" "game/src/rules.js" \
+  "  p.x = nx;
+  p.y = ny;
+  p.mp -= 1;" \
+  "  p.x = nx;
+  p.y = ny;"
+
+# --- Prisoner AI ----------------------------------------------------------
+add "AI never commits (stall limit disabled)" "game/src/prisonerAI.js" \
+  "const STALL_LIMIT = 3;" "const STALL_LIMIT = 99999;"
+
 echo "MUTATION AUDIT — $(date -u +%H:%M:%S)"
 echo
 survivors=0

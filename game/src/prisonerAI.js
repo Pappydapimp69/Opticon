@@ -116,8 +116,29 @@ function dirBetween(ax, ay, bx, by) {
 }
 
 // Turns of zero progress before the AI abandons caution and commits to the
-// exit unconditionally (resolves T24 — no round cap otherwise exists, so a
-// cautious AI could in principle stall a human Watcher's game forever).
+// exit unconditionally (resolves T24 — a cautious AI could in principle stall
+// a human Watcher's game forever).
+//
+// MEASURED REDUNDANT, and kept deliberately. A mutation audit set this to
+// 99999 — switching the guarantee off outright — and nothing failed. Chased
+// rather than patched over: against a Watcher that never rotates (the T24
+// scenario, which only a human produces), 24/24 games still resolve with zero
+// timeouts, even at caution 0.99 / riskAversion 200. Removing the OTHER guard
+// instead — the `stepsThisTurn >= 1` clause on the caution early-stop — also
+// resolves 24/24, though zero-move turns rise from 6/278 to 23/251.
+//
+// The reason is that the failure mode itself is gone. T24 was written when
+// routing used a binary avoid-set that could refuse every route and then
+// discard itself under pressure; `costPath` (beta-0.49.0) prices risk into
+// the route instead, so a cautious prisoner always has a path it is willing
+// to walk. Fear became a cost, not a wall, and a cost cannot deadlock.
+//
+// So this is belt-and-braces over a hazard that no longer exists. Kept
+// because it is free and because the reasoning above depends on costPath
+// staying a cost — but core-invariants.mjs deliberately does NOT pin this
+// constant. It asserts the OUTCOME T24 actually cares about (games resolve,
+// and not by limping to the round cap), which is the thing that must stay
+// true however it is achieved.
 const STALL_LIMIT = 3;
 
 // Prisoner-AI behaviour tiers.
