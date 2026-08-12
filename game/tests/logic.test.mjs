@@ -1005,12 +1005,28 @@ section("dispatched guards are pawns: one square of sight, paid for in action po
 
   g = withGuard(cx - 1, y);
   moveGuards(g);
-  ok(g.watcher.guards[0].ap === GUARD_ACTION_POINTS - GUARD_CAPTURE_COST,
-    `a capture spends ${GUARD_CAPTURE_COST} action points (got ${g.watcher.guards[0].ap})`);
+  // Deliberately NOT `ap === GUARD_ACTION_POINTS - GUARD_CAPTURE_COST`. That
+  // is the same constant on both sides of the equals sign, so it holds for
+  // ANY value of the constant including zero — it restates the implementation
+  // instead of testing it. Found by a mutation audit: setting the cost to 0
+  // was the one deliberate defect out of twelve that the whole suite missed.
+  // The literal is the spec; the second check is the property that makes the
+  // cost mean something at all.
+  ok(g.watcher.guards[0].ap === GUARD_ACTION_POINTS - 3,
+    `a capture spends exactly 3 action points (got ${GUARD_ACTION_POINTS - g.watcher.guards[0].ap})`);
+  ok(GUARD_CAPTURE_COST >= 2,
+    `and a grab costs materially more than a step, or the bar does not constrain it (${GUARD_CAPTURE_COST})`);
 
-  g = withGuard(cx - 1, y, GUARD_CAPTURE_COST - 1);
+  // A guard one point short of the grab must not make it. Written against the
+  // literal for the same reason: with a mutated cost of 0, `GUARD_CAPTURE_COST
+  // - 1` is -1 action points, and "a guard with -1 ap cannot capture" passes
+  // for a completely different reason than the one under test.
+  g = withGuard(cx - 1, y, 2);
   moveGuards(g);
-  ok(!g.prisoners[0].custody, "a guard that cannot afford the grab does not make it");
+  ok(!g.prisoners[0].custody, "a guard one point short of the grab does not make it");
+  g = withGuard(cx - 1, y, 3);
+  moveGuards(g);
+  ok(g.prisoners[0].custody === CUSTODY_TURNS, "and one with exactly enough does");
 }
 
 section("a decoy thrown after your own footsteps still pulls the guards");

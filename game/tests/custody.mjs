@@ -210,7 +210,10 @@ section("capture seizes; the clock is what kills");
   check(guard.x === at.x && guard.y === at.y,
     "a guard beside a cell holds position instead of chasing the fresh noise");
   check(guard.ap === GUARD_ACTION_POINTS - 1, `and standing watch costs a point a turn (got ${guard.ap})`);
-  check(guard.ap !== GUARD_ACTION_POINTS - GUARD_CAPTURE_COST, "it is not re-arresting someone already held");
+  // Literal, not constant-relative: `!== GUARD_ACTION_POINTS - GUARD_CAPTURE_COST`
+  // compares the constant against itself and survives any value of it.
+  check(guard.ap === GUARD_ACTION_POINTS - 1,
+    `standing watch costs 1, not the ${GUARD_CAPTURE_COST}-point grab — it is not re-arresting someone already held (got ${GUARD_ACTION_POINTS - guard.ap})`);
 }
 
 // ---- 10. A companion opens the cell --------------------------------------
