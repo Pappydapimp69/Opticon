@@ -27,6 +27,8 @@ import {
   CUSTODY_TURNS,
   SKILLS,
   SKILL_INFO,
+  spawnGuards,
+  addNoise,
 } from "./rules.js";
 import { playWatcherTurn, scoreDirections, DIFFICULTY } from "./watcherAI.js";
 import { prisonerAITurn } from "./prisonerAI.js";
@@ -34,9 +36,9 @@ import { Renderer } from "./render.js";
 import { Input } from "./input.js";
 import { Audio } from "./audio.js";
 import { UI } from "./ui.js";
-import { Tutorial, KEYS as TUTORIAL_KEYS } from "./tutorial.js";
+import { Tutorial, LESSONS } from "./tutorial.js";
 
-const BUILD = "beta-0.57.0";
+const BUILD = "beta-0.58.0";
 
 // AI companions: single-player modes field a small GROUP of prisoners (the
 // design doc's "Population Scaling" — more prisoners means more paranoia,
@@ -68,7 +70,8 @@ const app = {
   config: {
     humanRole: "Prisoner", // "Prisoner" | "Watcher"
     mode: "single", // "single" | "hotseat"
-    tutorial: false, // the guided first game (a single-player Prisoner game)
+    tutorial: false, // a guided lesson (tutorial.js LESSONS) instead of a real game
+    lesson: 0, // which lesson, when tutorial is on
     difficulty: "medium",
     seed: 1,
   },
@@ -181,6 +184,40 @@ function saveRecord(rec) {
 // Did the human's OWN side win? The Prisoner side wins if any prisoner
 // reaches the gate; the Watcher side wins on capture or on the round limit.
 // g.winner already encodes that, so this is just "is that my role".
+// Which lessons have been finished, by id. Only drives the ✓ marks and which
+// lesson the Tutorial button opens on; nothing in a real game reads it.
+const TUTORIAL_KEY = "opticon.tutorial.v1";
+function loadLessonsDone() {
+  try {
+    const s = JSON.parse(localStorage.getItem(TUTORIAL_KEY) || "{}");
+    return new Set(Array.isArray(s.done) ? s.done : []);
+  } catch {
+    return new Set();
+  }
+}
+function markLessonDone(id) {
+  const done = loadLessonsDone();
+  done.add(id);
+  try { localStorage.setItem(TUTORIAL_KEY, JSON.stringify({ done: [...done] })); } catch { /* ignore */ }
+  updateLessonUI();
+}
+function firstUnfinishedLesson() {
+  const done = loadLessonsDone();
+  const i = LESSONS.findIndex((l) => !done.has(l.id));
+  return i < 0 ? 0 : i;
+}
+function updateLessonUI() {
+  const row = document.getElementById("lessonRow");
+  if (!row) return;
+  row.classList.toggle("hidden", !app.config.tutorial);
+  const done = loadLessonsDone();
+  row.querySelectorAll("[data-lesson]").forEach((b) => {
+    const i = Number(b.getAttribute("data-lesson"));
+    b.classList.toggle("sel", i === app.config.lesson);
+    b.classList.toggle("done", done.has(LESSONS[i].id));
+  });
+}
+
 function humanWonGame(g) {
   return g.winner === app.config.humanRole;
 }
@@ -445,6 +482,7 @@ function openMenu() {
   updateRecordUI(); // a game just finished — show its result on the way back
   document.querySelectorAll(".play-btn").forEach((x) => x.classList.remove("sel"));
   updateStartLabel(); // reflect current app.config even if reopened mid-game
+  updateLessonUI();
 }
 
 // Same row/col grid nav drives both the main menu AND the game-over overlay
@@ -452,7 +490,7 @@ function openMenu() {
 // scope the query to whichever one is actually showing.
 function menuElements() {
   const root = app.input && app.input.mode === "overlay" ? "#overlay" : "#menu";
-  return Array.from(document.querySelectorAll(`${root} [data-row]`)).filter((el) => !el.classList.contains("hidden"));
+  return Array.from(document.querySelectorAll(`${root} [data-row]`)).filter((el) => !el.closest(".hidden"));
 }
 
 function currentFocusEl() {
@@ -581,6 +619,7 @@ function wireMenu() {
       el.classList.add("sel");
       Object.assign(app.config, overrides);
       saveSettings();
+      updateLessonUI();
       updateStartLabel();
       focusStartRow();
     });
@@ -589,6 +628,20 @@ function wireMenu() {
   modeBind("playWatcher", { humanRole: "Watcher", mode: "single", tutorial: false });
   modeBind("playHotseat", { humanRole: "Prisoner", mode: "hotseat", tutorial: false });
   modeBind("playTutorial", { humanRole: "Prisoner", mode: "single", tutorial: true });
+  document.getElementById("playTutorial")?.addEventListener("click", () => {
+    app.config.lesson = firstUnfinishedLesson();
+    updateLessonUI();
+    updateStartLabel();
+  });
+  document.querySelectorAll("[data-lesson]").forEach((b) => {
+    b.addEventListener("click", () => {
+      app.audio.resume(); app.audio.play("ui");
+      app.config.lesson = Number(b.getAttribute("data-lesson"));
+      updateLessonUI();
+      updateStartLabel();
+      focusStartRow();
+    });
+  });
   document.getElementById("tutorialSkip")?.addEventListener("click", () => handleIntent("tutorialSkip"));
 
   document.getElementById("btnRestart")?.addEventListener("click", () => {
@@ -624,7 +677,9 @@ function focusStartRow() {
 function updateStartLabel() {
   const el = document.getElementById("startLabel");
   if (!el) return;
-  const label = app.config.tutorial ? "Tutorial" : app.config.mode === "hotseat" ? "2P Hotseat" : app.config.humanRole;
+  const label = app.config.tutorial
+    ? `Lesson ${app.config.lesson + 1}: ${LESSONS[app.config.lesson].title}`
+    : app.config.mode === "hotseat" ? "2P Hotseat" : app.config.humanRole;
   el.textContent = `Hold to Start — ${label}`;
 }
 
@@ -642,6 +697,8 @@ function applyVolumeUI() {
 
 function startGame(overrides = {}) {
   Object.assign(app.config, overrides);
+  // A lesson decides which seat you sit in (the last one is the Watcher's).
+  if (app.config.tutorial) app.config.humanRole = LESSONS[app.config.lesson]?.role || "Prisoner";
   app.stagedPath = [];
   app.armedSkill = null;
   app.stagedFacing = null;
@@ -653,7 +710,13 @@ function startGame(overrides = {}) {
   // The tutorial runs alone: companions taking turns between lessons would
   // bury the one thing each step is about.
   const prisonerCount = app.config.mode === "hotseat" || app.config.tutorial ? 1 : PRISONER_COUNT;
-  const map = generateMap(app.config.seed, { ...MAP_DEFAULTS, prisonerCount });
+  let map = generateMap(app.config.seed, { ...MAP_DEFAULTS, prisonerCount });
+  // A lesson about windows on a map with no glass would have to skip itself.
+  // Re-roll (bounded) until the map has every object the lessons stand you by.
+  for (let i = 0; app.config.tutorial && i < 30 && !hasEveryLessonObject(map); i++) {
+    app.config.seed = (app.config.seed * 1103515245 + 12345) >>> 0 || 1;
+    map = generateMap(app.config.seed, { ...MAP_DEFAULTS, prisonerCount });
+  }
   app.game = createGame(map, {
     watcherFacing: 0,
     prisoners: map.spawns,
@@ -666,8 +729,14 @@ function startGame(overrides = {}) {
     // Tutorial: the eye cannot catch anyone until the lessons hand over.
     graceRounds: app.config.tutorial ? Infinity : 1,
   });
-  app.tutorial = app.config.tutorial ? new Tutorial(onTutorialChange) : null;
-  if (app.tutorial) app.game.watcher.skills[SKILLS.DISPATCH] = Infinity; // no guards either
+  app.tutorial = app.config.tutorial ? new Tutorial(app.config.lesson, onTutorialChange) : null;
+  app.tutorialAwake = false;
+  if (app.tutorial) {
+    // No AI guards either. Prisoner lessons only: in the Watcher lesson the
+    // skill is yours, and its badge would read "Infinity".
+    if (app.config.humanRole !== "Watcher") app.game.watcher.skills[SKILLS.DISPATCH] = Infinity;
+    app.tutorialSpawn = { x: app.game.prisoners[0].x, y: app.game.prisoners[0].y };
+  }
   app.game.prisoners.forEach((p) => (p.mpMax = 3));
   animatingPrisoner = 0;
   armedItem = null;
@@ -685,6 +754,7 @@ function startGame(overrides = {}) {
   app.ui.updateHud(app.game, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(app.game, shouldShowWatcherInfo());
   updateCommitButton();
+  if (app.tutorial) runStepSetup();
   renderTutorial();
 
   playIntroCutscene();
@@ -694,6 +764,11 @@ function startGame(overrides = {}) {
     // Prisoner AI takes its turn immediately, then it's the human Watcher's turn.
     scheduleAiPrisoner();
   }
+}
+
+function hasEveryLessonObject(map) {
+  const seen = new Set(map.objects.flat());
+  return [OBJ.DOOR, OBJ.SWITCH, OBJ.GLASS, OBJ.ITEM].every((o) => seen.has(o));
 }
 
 // "Lay of the land": a scripted camera flythrough played once per game start
@@ -802,18 +877,130 @@ function hintFor() {
 
 // ---- Tutorial --------------------------------------------------------------
 
-// Called by the tracker whenever a step passes or the player skips out. The
-// moment the teaching steps are over, the eye wakes: captures and guards come
-// back, and what is left is a real game.
+// Called by the tracker whenever a step passes, is skipped past, or the player
+// leaves. Wakes the eye at the first non-calm step, stages the next step, and
+// closes the lesson when its last step is done.
 function onTutorialChange(t) {
   const g = app.game;
-  if (g && !t.calm && g.graceRounds !== 0) {
+  if (g && !t.calm && !app.tutorialAwake) {
+    app.tutorialAwake = true;
     g.graceRounds = 0;
-    g.watcher.skills[SKILLS.DISPATCH] = SKILL_INFO[SKILLS.DISPATCH].cooldown; // a breather before the first squad
+    if (app.config.humanRole !== "Watcher") g.watcher.skills[SKILLS.DISPATCH] = SKILL_INFO[SKILLS.DISPATCH].cooldown; // a breather before the first squad
     if (!t.done) app.ui.banner("The eye is awake", "bad");
   }
-  if (!t.done) app.audio.play("ui");
+  if (t.done) {
+    if (!t.skipped) finishLesson();
+  } else {
+    app.audio.play("ui");
+    runStepSetup();
+  }
   renderTutorial();
+}
+
+// The lesson is over. A lesson that ends by winning closes through checkOver's
+// game-over screen; every other lesson ends here, mid-game, on its own screen.
+function finishLesson() {
+  const t = app.tutorial;
+  if (!t) return;
+  markLessonDone(t.lesson.id);
+  const next = t.isLast ? null : LESSONS[t.lessonIndex + 1];
+  if (next) app.config.lesson = t.lessonIndex + 1;
+  if (app.game && isOver(app.game)) return; // checkOver shows the result
+  app.running = false;
+  app.audio.play("escape");
+  app.ui.lessonComplete(t.lesson.title, next ? next.title : null);
+  app.input.mode = "overlay";
+  menu.row = 0;
+  menu.col = 0;
+  menuFocusApply();
+}
+
+// Stage the current step: move the player beside what the step is about, hand
+// over its item, cuff them, send guards. If this map cannot stage it (no
+// unbroken window, say), pass the step rather than strand the player on a
+// lesson they cannot do.
+function runStepSetup() {
+  const t = app.tutorial, g = app.game;
+  const step = t?.step;
+  if (!g || !step || !step.setup) return;
+  const su = step.setup;
+  const p = g.prisoners[0];
+  app.stagedPath = [];
+  if (su.place && !tutorialPlace(g, p, su.place)) {
+    app.ui.banner(`Skipped "${step.title}" — this map has none`, "watcher");
+    t.advance();
+    return;
+  }
+  if (su.give) { p.items = [...su.give]; _itemBarSig = ""; armedItem = null; }
+  if (su.custody) {
+    p.custody = CUSTODY_TURNS; p.mp = 0; p.muffled = false; p.graceTurns = 0; p.struggledThisTurn = false;
+  }
+  if (su.guards === "here") spawnGuards(g, quadrantOf(g, p.x, p.y));
+  if (su.ready) g.watcher.skills[su.ready] = 0;
+  if (su.noise) {
+    const at = tutorialFindTile(g, (x, y) => isWalkable(g, x, y), app.tutorialSpawn, 8);
+    if (at) addNoise(g, at.x, at.y, "decoy");
+  }
+  if (su.openDoor) {
+    const d = tutorialFindTile(g, (x, y) => objAt(g, x, y) === OBJ.DOOR && !isDoorOpen(g, x, y)
+      && !g.prisoners.some((q) => q.x === x && q.y === y));
+    if (d) g.openedDoors.add(d.y * g.map.size + d.x);
+  }
+  // Watcher lessons: a hidden AI prisoner that walks out the gate while you
+  // are still learning to aim would end the lesson on a loss nobody taught.
+  // Put it back at its start whenever it gets close (the Watcher never sees
+  // prisoners, so nothing on screen jumps).
+  if (su.respawn && app.config.humanRole === "Watcher") {
+    const ex = g.map.exit;
+    if (Math.abs(p.x - ex.x) + Math.abs(p.y - ex.y) < 16 || p.custody) {
+      p.x = app.tutorialSpawn.x; p.y = app.tutorialSpawn.y;
+      p.startTurnPos = { ...app.tutorialSpawn }; p.custody = 0;
+    }
+  }
+  updateItemBar();
+  updateCustodyUI();
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
+  app.ui.hint(hintFor());
+  updateCommitButton();
+}
+
+// Nearest tile to `from` (default: anywhere) for which pred(x, y) holds,
+// optionally at least `minDist` away.
+function tutorialFindTile(g, pred, from = null, minDist = 0) {
+  const n = g.map.size;
+  let best = null, bestD = Infinity;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (!pred(x, y)) continue;
+    const d = from ? Math.abs(x - from.x) + Math.abs(y - from.y) : 0;
+    if (d < minDist) continue;
+    if (d < bestD) { bestD = d; best = { x, y }; }
+  }
+  return best;
+}
+
+// Put the prisoner on a free floor tile right next to the thing a step is
+// about, preferring shadow. "open" = anywhere a thrown item has room to land.
+function tutorialPlace(g, p, kind) {
+  const free = (x, y) => isWalkable(g, x, y) && objAt(g, x, y) === OBJ.NONE;
+  const targetAt = {
+    door: (x, y) => objAt(g, x, y) === OBJ.DOOR && !isDoorOpen(g, x, y),
+    switch: (x, y) => objAt(g, x, y) === OBJ.SWITCH,
+    glass: (x, y) => objAt(g, x, y) === OBJ.GLASS && !g.brokenWindows.has(y * g.map.size + x),
+    item: (x, y) => objAt(g, x, y) === OBJ.ITEM && !g.takenItems.has(y * g.map.size + x),
+    open: (x, y) => [0, 1, 2, 3].some((d) => [1, 2, 3].every((i) => free(x + DIR_VEC[d].dx * i, y + DIR_VEC[d].dy * i))),
+  }[kind];
+  if (!targetAt) return false;
+  const stand = kind === "open"
+    ? (x, y) => free(x, y) && targetAt(x, y)
+    : (x, y) => free(x, y) && [0, 1, 2, 3].some((d) => targetAt(x + DIR_VEC[d].dx, y + DIR_VEC[d].dy));
+  const from = { x: p.x, y: p.y };
+  const at = tutorialFindTile(g, (x, y) => stand(x, y) && !isLit(g, x, y), from)
+    || tutorialFindTile(g, stand, from);
+  if (!at) return false;
+  p.x = at.x; p.y = at.y;
+  p.startTurnPos = { x: at.x, y: at.y };
+  p.mp = p.mpMax || 3;
+  return true;
 }
 
 function renderTutorial() {
@@ -822,10 +1009,10 @@ function renderTutorial() {
   const v = app.tutorial?.view(app.input?.activeScheme || "keyboard");
   card.classList.toggle("hidden", !v);
   if (!v) return;
-  document.getElementById("tutorialStep").textContent = `Tutorial ${v.n}/${v.total}`;
+  document.getElementById("tutorialStep").textContent = `Lesson ${v.lesson}/${v.lessons} · ${v.n}/${v.total}`;
   document.getElementById("tutorialTitle").textContent = v.title;
   document.getElementById("tutorialText").textContent = v.text;
-  document.getElementById("tutorialSkip").textContent = app.input?.activeScheme === "touch" ? "Skip tutorial" : `Skip tutorial (${v.skip})`;
+  document.getElementById("tutorialSkip").textContent = app.input?.activeScheme === "touch" ? "Skip lesson" : `Skip lesson (${v.skip})`;
 }
 
 // ---- Intent handling -----------------------------------------------------
@@ -1007,6 +1194,7 @@ function doStruggle() {
     return;
   }
   const r = struggle(g);
+  if (r.ok) app.tutorial?.emit("struggle");
   if (!r.ok) {
     app.audio.play("blocked");
     app.ui.hint(r.reason === "already-tried" ? "You have already tried this turn." : hintFor());
@@ -1060,6 +1248,7 @@ function doBreakWindow(dir) {
   }
   const r = breakWindow(g, dir);
   if (r.ok) {
+    app.tutorial?.emit("break");
     app.audio.play("glass");
     app.renderer.triggerPing(r.x, r.y);
   } else {
@@ -1114,6 +1303,7 @@ function doUseItem(kind, dirOrNull) {
   }
   const r = useItem(g, kind, dirOrNull);
   if (r.ok) {
+    app.tutorial?.emit("item", { kind });
     if (r.event === "distract") {
       app.audio.play("noise");
       app.renderer.triggerPing(r.x, r.y);
@@ -1351,6 +1541,7 @@ function doUseSkill(skill) {
   }
   const r = useSkill(g, skill, arg);
   if (r.ok) {
+    app.tutorial?.emit("skill", { skill });
     if (r.event === "lock") {
       app.audio.play("lock");
       app.renderer.triggerPing(r.x, r.y);
@@ -1527,6 +1718,7 @@ function stageRotation(delta) {
   } else {
     app.stagedFacing = next === base ? null : next;
     app.audio.play("rotate");
+    if (app.stagedFacing != null) app.tutorial?.emit("aimed");
   }
   afterWatcherStateChange();
 }
@@ -1539,6 +1731,7 @@ function commitStagedRotation() {
   const delta = ((app.stagedFacing - g.watcher.facing + 4) % 4) === 1 ? 1 : -1;
   const r = rotateWatcher(g, delta);
   clearStagedRotation();
+  if (r.ok) app.tutorial?.emit("rotated");
   app.audio.play(r.ok ? "rotate" : "blocked");
   afterWatcherStateChange();
 }
@@ -1582,6 +1775,7 @@ function stagePathExtend(dir) {
     if (path.length === 0) {
       const r = moveActivePrisoner(g, dir);
       if (r.ok) {
+        app.tutorial?.emit("world", { event: r.event });
         if (r.event === "door-open") app.audio.play("door");
         else if (r.event === "switch") app.audio.play("switch");
         app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
@@ -1627,6 +1821,7 @@ function commitStagedPath() {
   animatingPrisoner = g.activePrisoner;
   app.renderer.walkTo(animatingPrisoner, fromTile, walkSteps);
   if (walkSteps.length) app.tutorial?.emit("committed");
+  for (const w of walkSteps) if (w.event) app.tutorial?.emit("world", { event: w.event });
   app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
   app.ui.renderLog(g, shouldShowWatcherInfo());
   app.ui.hint(hintFor());
@@ -1640,7 +1835,7 @@ function doEndPrisonerTurn() {
   const dist = Math.abs(p.x - startPos.x) + Math.abs(p.y - startPos.y);
   // Read before endPrisonerTurn clears the muffle. `noisy` is the rules' own
   // noise condition, so the lesson passes exactly when the game made noise.
-  const tutorialTurn = { noisy: dist >= 2 && !p.muffled, lit: isLit(g, p.x, p.y) };
+  const tutorialTurn = { noisy: dist >= 2 && !p.muffled, lit: isLit(g, p.x, p.y), held: p.custody > 0 };
   endPrisonerTurn(g);
   app.tutorial?.emit("turnEnded", tutorialTurn);
   if (dist >= 2) {
@@ -1684,6 +1879,7 @@ function handleWatcherIntent(intent, arg) {
       const skill = app.armedSkill;
       app.armedSkill = null;
       const r = useSkill(g, skill, arg);
+      if (r.ok) app.tutorial?.emit("skill", { skill });
       // A same-direction Double Bluff is a recoverable target mistake: keep
       // the skill armed so the player can choose another direction directly.
       if (!r.ok && skill === SKILLS.DOUBLE_BLUFF && r.reason === "same-direction") {
@@ -1698,6 +1894,7 @@ function handleWatcherIntent(intent, arg) {
     }
     const r = setBluff(g, arg);
     if (r.ok) {
+      app.tutorial?.emit("bluffed");
       app.audio.play("bluff");
     } else if (r.reason === "wide-scan-armed") {
       app.audio.play("blocked");
@@ -1723,6 +1920,7 @@ function handleWatcherIntent(intent, arg) {
     // Scan (commit), then end turn.
     const scan = watcherScan(g, exposureTier());
     app.audio.play("scan");
+    app.tutorial?.emit("scanned");
     if (scan.caught) {
       app.audio.play("caught");
       app.ui.banner("CAPTURED!", "bad");
@@ -1968,7 +2166,13 @@ function checkOver() {
     app.resultRecorded = true;
     if (alreadyRecorded) return;
     const result = recordGameResult(g);
-    if (humanWonGame(g)) app.tutorial?.emit("escaped");
+    // Winning a lesson always completes it, even before its last step: a
+    // Watcher who catches the prisoner early has learned what it taught.
+    if (humanWonGame(g) && app.tutorial && !app.tutorial.done) {
+      app.tutorial.index = app.tutorial.steps.length;
+      finishLesson();
+      renderTutorial();
+    }
     if (g.winner === "Prisoner") app.audio.play("escape");
     else app.audio.play("caught");
     setTimeout(() => {
@@ -1976,8 +2180,11 @@ function checkOver() {
         difficulty: playDifficulty(),
         record: result ? `${app.config.humanRole} on ${result.diff}: ${recordLine(result.role, result.diff)}` : "",
         note: app.config.tutorial
-          ? (humanWonGame(g) ? "Tutorial complete. Pick Prisoner or Watcher on the menu for a real game." : "Tutorial game — not counted. Play again to retry it.")
+          ? (humanWonGame(g)
+              ? (app.config.lesson !== app.tutorial?.lessonIndex ? `Lesson complete. Next: ${LESSONS[app.config.lesson].title}.` : "Tutorial complete. Pick Prisoner or Watcher on the menu for a real game.")
+              : "Lesson not counted. Play again to retry it.")
           : "",
+        nextLabel: app.config.tutorial && humanWonGame(g) && app.config.lesson !== app.tutorial?.lessonIndex ? "Next lesson" : null,
       });
       // The overlay's buttons weren't reachable by gamepad/keyboard at all —
       // input.mode stayed "game" (no screen change ever set it), so a

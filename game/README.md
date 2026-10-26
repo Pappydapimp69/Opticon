@@ -26,10 +26,12 @@ cd game && python3 -m http.server 8000
 - **Watcher (vs AI Prisoner)** — you never see the prisoner; hunt by inference.
 - **2P Hotseat** — pass the device; the prisoner's position is hidden on the
   Watcher's turn.
-- **Tutorial** — a guided first game as the Prisoner: plan, commit, end a
-  turn, noise, light, the camera, then a real escape. The eye cannot catch you
-  until the last step; `Esc` / gamepad Back / the Skip button leaves at any
-  time. Never counted in your record.
+- **Tutorial** — six short lessons, picked from the menu: Basics (plan,
+  commit, end turn, noise, light, camera, escape) · Doors, lights & windows ·
+  Using items (every item) · Getting caught (struggle, Transfer, Shim, Loose) ·
+  Guards · Playing the Watcher (aim, bluff, scan, noise, every skill). The eye
+  cannot catch you while a lesson teaches; `Esc` / gamepad Back / Skip leaves
+  at any time. Never counted in your record.
 
 ### Controls
 | | Prisoner | Watcher |

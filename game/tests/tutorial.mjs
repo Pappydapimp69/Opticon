@@ -12,7 +12,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { chromium, chromiumPath } from "./browser.mjs";
 import { driveEscape } from "./escape.mjs";
-import { Tutorial, STEPS, KEYS, WAKE_STEP } from "../src/tutorial.js";
+import { Tutorial, LESSONS, KEYS } from "../src/tutorial.js";
+import { ITEM_KINDS } from "../src/map.js";
+import { SKILLS } from "../src/rules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -39,18 +41,18 @@ function check(cond, label) {
 }
 
 // ---- 1. Pure -------------------------------------------------------------
-// The control each event needs. A step's text must name it, or the player is
-// told to do something other than what passes the step.
-const NEEDS = { planned: "move", committed: "commit", turnEnded: "end", view: "view" };
+// Every step that names a control must name the one in its own `key`, in every
+// scheme, or the player is told to do something other than what passes it.
 for (const [scheme, k] of Object.entries(KEYS)) {
-  for (const s of STEPS) {
-    const need = NEEDS[s.on];
-    if (!need) continue;
-    check(s.text(k).includes(k[need]), `[${scheme}] "${s.id}" names the control that passes it (${k[need]})`);
+  for (const L of LESSONS) {
+    for (const s of L.steps) {
+      if (!s.key) continue;
+      check(typeof k[s.key] === "string" && s.text(k).includes(k[s.key]), `[${scheme}] ${L.id}/${s.id} names its control (${k[s.key]})`);
+    }
   }
 }
 {
-  const t = new Tutorial();
+  const t = new Tutorial(0);
   check(!t.emit("committed") && t.step.id === "plan", "an event for a later step does not pass the current one");
   t.emit("planned"); t.emit("committed"); t.emit("turnEnded", { noisy: false, lit: true });
   check(t.step.id === "noise", "plan → commit → end turn reaches the noise lesson");
@@ -58,14 +60,20 @@ for (const [scheme, k] of Object.entries(KEYS)) {
   check(t.emit("turnEnded", { noisy: true, lit: true }), "a noisy turn passes it");
   check(!t.emit("turnEnded", { noisy: false, lit: true }), "ending a turn lit does not pass the shadow lesson");
   check(t.emit("turnEnded", { noisy: false, lit: false }), "ending a turn in shadow does");
-  check(t.calm, "the eye is still asleep before the last lesson");
+  check(t.calm, "the eye is still asleep before the last basics step");
   t.emit("view");
-  check(t.index === WAKE_STEP && !t.calm, "reaching the escape lesson wakes the eye");
-  t.emit("escaped");
-  check(t.done && t.view() === null, "escaping finishes the tutorial");
-  const u = new Tutorial();
-  u.skip();
-  check(u.done && !u.calm, "skip leaves the tutorial from any step, eye awake");
+  check(t.step.id === "gate" && !t.calm, "reaching the escape step wakes the eye");
+  const u = new Tutorial(2);
+  check(!u.emit("item", { kind: "muffle" }) && u.step.id === "distract", "using the wrong item does not pass an item step");
+  check(u.emit("item", { kind: "distract" }) && u.step.id === "muffle", "using the right one does");
+  const v = new Tutorial(3);
+  v.skip();
+  check(v.done && v.skipped, "skip leaves a lesson from any step");
+  // Every item the game has is taught, and every Watcher skill.
+  const taughtItems = new Set(LESSONS.flatMap((L) => L.steps.filter((s) => s.on === "item").flatMap((s) => s.setup?.give || [])));
+  for (const kind of Object.values(ITEM_KINDS)) check(taughtItems.has(kind), `item "${kind}" has a lesson step that uses it`);
+  const taughtSkills = new Set(LESSONS.flatMap((L) => L.steps.filter((s) => s.on === "skill").map((s) => s.setup?.ready)));
+  for (const skill of Object.values(SKILLS)) check(taughtSkills.has(skill), `skill "${skill}" has a lesson step that uses it`);
 }
 
 // ---- 2. Browser ----------------------------------------------------------
@@ -116,7 +124,7 @@ const OPP = { KeyW: "KeyS", KeyS: "KeyW", KeyA: "KeyD", KeyD: "KeyA" };
   await page.keyboard.down("Space"); await page.waitForTimeout(750); await page.keyboard.up("Space");
   await page.waitForTimeout(500);
   await page.click("#playTutorial");
-  check((await page.textContent("#startLabel")).includes("Tutorial"), "Start button says it will launch the Tutorial");
+  check((await page.textContent("#startLabel")).includes("Lesson 1"), "Start button names the lesson it will launch");
   await page.hover("#btnStart");
   await page.mouse.down(); await page.waitForTimeout(750); await page.mouse.up();
   await page.waitForTimeout(300);
@@ -193,7 +201,8 @@ const OPP = { KeyW: "KeyS", KeyS: "KeyW", KeyA: "KeyD", KeyD: "KeyA" };
     });
     if (!over) await page.waitForTimeout(150);
   }
-  check(!!over && over.includes("Tutorial complete"), "escaping ends on 'Tutorial complete'");
+  check(!!over && over.includes("Lesson complete"), "escaping ends lesson 1 on 'Lesson complete'");
+  check((await page.textContent("#btnRestart2")) === "Next lesson", "the result screen offers Next lesson");
   check(!(await card()).visible, "the card is gone once the tutorial is finished");
   check((await page.evaluate(() => localStorage.getItem("opticon.record.v1"))) === recordBefore, "the W/L record is untouched");
 
@@ -202,10 +211,10 @@ const OPP = { KeyW: "KeyS", KeyS: "KeyW", KeyA: "KeyD", KeyD: "KeyA" };
   await page.waitForTimeout(400);
   await page.evaluate(() => window.__opticon.renderer.skipIntro());
   await humanTurn();
-  check((await card()).id === "plan", "Play again restarts the tutorial from step 1");
+  check((await page.evaluate(() => window.__opticon.tutorial.lesson.id)) === "yard", "Next lesson starts lesson 2");
   await press("Escape", 300);
   const afterSkip = await page.evaluate(() => ({ grace: window.__opticon.game.graceRounds, hidden: document.getElementById("tutorialCard").classList.contains("hidden") }));
-  check(afterSkip.hidden && afterSkip.grace === 0, "Esc skips the tutorial: card gone, eye awake, game carries on");
+  check(afterSkip.hidden, "Esc skips the lesson: card gone, game carries on");
 
   // Phone width: card still fits and clears the rail.
   await page.evaluate(() => document.getElementById("btnRestart").click());

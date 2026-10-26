@@ -177,7 +177,26 @@ export class UI {
     if (this.el.hint) this.el.hint.textContent = text || "";
   }
 
+  // A lesson that ends mid-game (not by a win or a loss) gets its own result
+  // screen on the same overlay. "Play again" becomes "Next lesson": main.js
+  // has already pointed the config at it.
+  lessonComplete(title, nextTitle) {
+    this.el.overlay.classList.remove("hidden");
+    this.el.overlayTitle.textContent = "LESSON COMPLETE";
+    this.el.overlayTitle.className = "escaped";
+    this.el.overlayText.textContent = nextTitle
+      ? `${title} — done. Next: ${nextTitle}.`
+      : `${title} — done. That is every lesson. Pick Prisoner or Watcher on the menu for a real game.`;
+    this._setPlayAgain(nextTitle ? "Next lesson" : "Play again");
+  }
+
+  _setPlayAgain(label) {
+    const b = document.getElementById("btnRestart2");
+    if (b) b.textContent = label;
+  }
+
   gameOver(game, meta = {}) {
+    this._setPlayAgain(meta.nextLabel || "Play again");
     const won = game.winner === "Prisoner";
     this.el.overlay.classList.remove("hidden");
     this.el.overlayTitle.textContent = won ? "ESCAPED" : game.timedOut ? "TIME UP" : "CAPTURED";

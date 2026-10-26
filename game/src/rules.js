@@ -909,23 +909,8 @@ export function useSkill(game, skill, arg) {
   if (skill === SKILLS.DISPATCH) {
     // arg is a quadrant index 0-3 (N/E/S/W), same convention as facing/bluff.
     if (!Number.isInteger(arg) || arg < 0 || arg > 3) return { ok: false, reason: "no-quadrant" };
-    const post = game.map.guardPosts[arg];
-    // Stable per-guard id so the renderer can track a mesh across moves
-    // instead of re-keying by position (which changes every round).
-    const params = dispatchParams(game);
-    const w = game.watcher;
-    w._guardSeq = (w._guardSeq || 0) + 1;
-    const id1 = w._guardSeq;
-    w._guardSeq += 1;
-    const id2 = w._guardSeq;
-    const fresh = (id) => ({
-      id, x: post.x, y: post.y, quadrant: arg,
-      ap: params.actionPoints,   // the action bar
-      turnsActive: 0,            // drives the deployment burst window
-      spent: false,              // bar hit zero — recalled NEXT turn, not now
-    });
-    game.watcher.guards.push(fresh(id1), fresh(id2));
-    spend(params.cooldown);
+    spawnGuards(game, arg);
+    spend(dispatchParams(game).cooldown);
     logMsg(game, `Guards dispatched to the ${DIRS[arg]} quadrant.`);
     return { ok: true, event: "dispatch", quadrant: arg };
   }
@@ -983,6 +968,27 @@ export const DISPATCH_TIER = Object.freeze({
   medium: { actionPoints: GUARD_ACTION_POINTS, cooldown: SKILL_INFO[SKILLS.DISPATCH].cooldown },
   hard: { actionPoints: 9, cooldown: 3 },
 });
+
+// Put a fresh guard pair at a quadrant's post. The body of DISPATCH, split out
+// so the tutorial can stage a sweep without spending a Watcher turn.
+export function spawnGuards(game, quadrant) {
+  const post = game.map.guardPosts[quadrant];
+  // Stable per-guard id so the renderer can track a mesh across moves
+  // instead of re-keying by position (which changes every round).
+  const params = dispatchParams(game);
+  const w = game.watcher;
+  w._guardSeq = (w._guardSeq || 0) + 1;
+  const id1 = w._guardSeq;
+  w._guardSeq += 1;
+  const id2 = w._guardSeq;
+  const fresh = (id) => ({
+    id, x: post.x, y: post.y, quadrant,
+    ap: params.actionPoints,   // the action bar
+    turnsActive: 0,            // drives the deployment burst window
+    spent: false,              // bar hit zero — recalled NEXT turn, not now
+  });
+  w.guards.push(fresh(id1), fresh(id2));
+}
 
 export function dispatchParams(game) {
   return DISPATCH_TIER[game.dispatchTier] || DISPATCH_TIER.medium;

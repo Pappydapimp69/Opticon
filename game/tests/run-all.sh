@@ -110,6 +110,9 @@ echo
 echo "== tutorial (a robot pressing only what the card says finishes it; the eye sleeps until the last lesson) =="
 node tests/tutorial.mjs
 echo
+echo "== tutorial lessons 2-6 (robot plays every lesson by the controls each card names) =="
+node tests/tutorial-lessons.mjs
+echo
 echo "== menu resume (the menu is not a one-way door: Resume / Esc / B return to the same game) =="
 node tests/menu-resume.mjs
 echo

@@ -558,3 +558,14 @@ html, body {
   background: rgba(89,247,166,0.08); border: 1px solid rgba(89,247,166,0.5);
 }
 .resume-btn:hover { background: rgba(89,247,166,0.16); }
+
+/* ---- Lesson picker (Tutorial selected) ---- */
+.lesson-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.lesson-chip {
+  padding: 6px 10px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--line); color: var(--text);
+}
+.lesson-chip .lc-n { font-weight: 700; color: var(--exit); margin-right: 2px; }
+.lesson-chip.done::after { content: " ✓"; color: var(--exit); }
+.lesson-chip.sel { border-color: var(--exit); background: rgba(89,247,166,0.12); }
+.lesson-chip:hover { background: rgba(255,255,255,0.09); }
