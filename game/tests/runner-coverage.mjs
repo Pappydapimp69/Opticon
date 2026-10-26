@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const HELPERS = new Set(["browser.mjs"]); // imported by tests, not tests themselves
+const HELPERS = new Set(["browser.mjs", "escape.mjs"]); // imported by tests, not tests themselves
 const runner = fs.readFileSync(path.join(dir, "run-all.sh"), "utf8");
 const missing = fs.readdirSync(dir)
   .filter((f) => f.endsWith(".mjs") && !HELPERS.has(f))

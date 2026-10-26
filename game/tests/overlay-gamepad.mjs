@@ -9,6 +9,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { chromium, chromiumPath } from "./browser.mjs";
+import { driveEscape } from "./escape.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -71,27 +72,11 @@ function check(cond, label) {
   await page.waitForTimeout(400);
   await page.evaluate(() => window.__opticon.renderer.skipIntro());
 
-  // Teleport the prisoner adjacent to the exit, facing it, then actually
-  // step in (same pattern as wincheck.mjs) — checkOver() only fires from the
-  // real move-resolution/walk-animation path, not from a raw state mutation.
-  const dir = await page.evaluate(() => {
-    const a = window.__opticon, g = a.game, m = g.map, p = g.prisoners[0];
-    const ex = m.exit;
-    const N = [[0, -1, 0], [1, 0, 1], [0, 1, 2], [-1, 0, 3]];
-    for (const [dx, dy, toExitDir] of N) {
-      const nx = ex.x - dx, ny = ex.y - dy;
-      if (m.tiles[ny] && m.tiles[ny][nx] === 0) {
-        p.x = nx; p.y = ny; p.startTurnPos = { x: nx, y: ny }; p.mp = 3; g.turn = "Prisoner";
-        return toExitDir;
-      }
-    }
-    return -1;
-  });
-  const keyByDir = ["KeyW", "KeyD", "KeyS", "KeyA"];
-  if (dir >= 0) {
-    await page.keyboard.press(keyByDir[dir]);
-    await page.waitForTimeout(200);
-    await page.keyboard.press("Space");
+  const setup = await driveEscape(page);
+  if (!setup.ok) {
+    console.log(`SETUP FAILED: ${setup.reason} — not a feature failure`);
+    await browser.close(); server.close();
+    process.exit(2);
   }
   let overlayVisible = false;
   for (let i = 0; i < 40; i++) {
@@ -99,7 +84,6 @@ function check(cond, label) {
     if (overlayVisible) break;
     await page.waitForTimeout(150);
   }
-  check(dir >= 0, "found a walkable exit-adjacent tile to drive a real escape");
   {
     check(overlayVisible, "game-over overlay is visible");
     const inputMode = await page.evaluate(() => window.__opticon.input.mode);

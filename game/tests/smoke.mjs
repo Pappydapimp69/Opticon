@@ -113,12 +113,25 @@ const scenario = process.argv[2] || "prisoner";
   // Drive some turns via keyboard.
   const keys = scenario === "watcher"
     ? ["KeyQ", "Digit2", "Space", "KeyE", "Space"]
-    : ["KeyW", "Space", "KeyD", "Space", "KeyD", "Space", "KeyV"];
+    : ["KeyW", "Space", "KeyD", "Space", "KeyD", "Space"];
   for (const k of keys) {
     await page.keyboard.press(k);
     await page.waitForTimeout(320);
   }
   await page.waitForTimeout(900);
+
+  // The view toggle is checked on its own, not as the last key of the drive:
+  // in hotseat that key could land on the pass-the-device gate (any key just
+  // dismisses it, and dismissing resets the view), so whether KeyV toggled
+  // anything depended on runner speed — green locally, red on CI.
+  const viewBeforeToggle = await page.evaluate(async () => {
+    const a = window.__opticon;
+    if (a.input.mode === "pass" && a.input.passHandler) a.input.passHandler();
+    for (let i = 0; i < 50 && a.input.mode !== "game"; i++) await new Promise((r) => setTimeout(r, 100));
+    return a.viewMode;
+  });
+  await page.keyboard.press("KeyV");
+  await page.waitForTimeout(320);
 
   // Read internal state.
   const state = await page.evaluate(() => {
@@ -145,14 +158,14 @@ const scenario = process.argv[2] || "prisoner";
     ? state.round > before.round || state.facing !== before.facing
     : state.prisoner.x !== before.x || state.prisoner.y !== before.y ||
       state.prisoner.mp !== before.mp || state.round > before.round;
-  const viewChanged = scenario === "watcher" ? true : state.viewMode !== before.view;
+  const viewChanged = scenario === "watcher" ? true : state.viewMode !== viewBeforeToggle;
 
   const shot = path.join(ROOT, "tests", `shot-${scenario}.png`);
   await page.screenshot({ path: shot });
 
   console.log("BUILD:", build);
   console.log("STATE:", JSON.stringify(state, null, 2));
-  console.log("DROVE:", moved ? "yes" : "NO — every keypress was ignored", `(view ${before.view} -> ${state.viewMode})`);
+  console.log("DROVE:", moved ? "yes" : "NO — every keypress was ignored", `(view ${viewBeforeToggle} -> ${state.viewMode})`);
   console.log("ERRORS:", errors.length);
   errors.slice(0, 20).forEach((e) => console.log("  •", e));
   if (process.env.VERBOSE) logs.forEach((l) => console.log("  ", l));

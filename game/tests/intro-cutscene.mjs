@@ -126,9 +126,20 @@ async function dismissIntroAndStart(page, playBtnId) {
     check(afterSkip.active === false, "cutsceneActive clears once skipped");
 
     // Normal play must work immediately afterward (input isn't stuck gated).
-    await page.keyboard.press("KeyD");
-    await page.waitForTimeout(200);
-    const moved2 = await page.evaluate(() => window.__opticon.stagedPath.length > 0);
+    // Wait for the HUMAN to hold the turn (an AI companion can move first, and
+    // its keys are ignored), then try each direction: a single KeyD failed
+    // whenever that neighbour was a wall or the AI still had the turn.
+    await page.waitForFunction(() => {
+      const a = window.__opticon;
+      return a && a.game && !a.aiThinking && a.game.turn === "Prisoner" && a.game.activePrisoner === 0;
+    }, null, { timeout: 20000 }).catch(() => {});
+    let moved2 = false;
+    for (const k of ["KeyD", "KeyA", "KeyW", "KeyS"]) {
+      await page.keyboard.press(k);
+      await page.waitForTimeout(200);
+      moved2 = await page.evaluate(() => window.__opticon.stagedPath.length > 0);
+      if (moved2) break;
+    }
     check(moved2, "gameplay input works normally right after the cutscene ends");
 
     check(errors.length === 0, `scenario 1: no console errors (${errors.length} found)`);
