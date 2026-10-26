@@ -419,13 +419,27 @@ function dismissPassDevice() {
   updateCommitButton();
 }
 
+// A game you left for the menu and can go back to. Not a finished one: the
+// game-over screen's "Main menu" lands here too, and there is nothing to resume.
+function canResume() {
+  return !!app.game && !isOver(app.game);
+}
+
 function openMenu() {
   app.running = false;
   app.ui.showMenu();
   app.input.mode = "menu";
-  menu.row = 0;
-  menu.col = ["easy", "medium", "hard"].indexOf(app.config.difficulty);
-  if (menu.col < 0) menu.col = 1;
+  const resumable = canResume();
+  document.getElementById("btnResume")?.classList.toggle("hidden", !resumable);
+  if (resumable) {
+    // Focus Resume, not difficulty: backing straight out is the likely intent.
+    menu.row = START_ROW;
+    menu.col = 0; // Resume
+  } else {
+    menu.row = 0;
+    menu.col = ["easy", "medium", "hard"].indexOf(app.config.difficulty);
+    if (menu.col < 0) menu.col = 1;
+  }
   menuFocusApply();
   applyVolumeUI(); // pick up a mid-game HUD mute toggle if one happened
   updateRecordUI(); // a game just finished — show its result on the way back
@@ -438,7 +452,7 @@ function openMenu() {
 // scope the query to whichever one is actually showing.
 function menuElements() {
   const root = app.input && app.input.mode === "overlay" ? "#overlay" : "#menu";
-  return Array.from(document.querySelectorAll(`${root} [data-row]`));
+  return Array.from(document.querySelectorAll(`${root} [data-row]`)).filter((el) => !el.classList.contains("hidden"));
 }
 
 function currentFocusEl() {
@@ -496,7 +510,24 @@ function menuSelect() {
   cur.click();
 }
 
-function menuBack() {} // no stages to back out of anymore; kept as a no-op so input.js's binding stays valid
+// Esc / Backspace / gamepad B on the menu: back to the game in play, if any.
+function menuBack() {
+  if (app.input.mode === "menu" && canResume()) resumeGame();
+}
+
+function resumeGame() {
+  if (!canResume()) return;
+  app.audio.resume(); app.audio.play("ui");
+  app.ui.showHud();
+  app.running = true;
+  app.input.mode = "game";
+  const g = app.game;
+  app.ui.updateHud(g, app.viewMode, humanLabel(), shouldShowWatcherInfo(), humanControlsCurrentTurn(), app.stagedFacing, shouldRevealGaze());
+  app.ui.renderLog(g, shouldShowWatcherInfo());
+  app.ui.hint(hintFor());
+  updateCommitButton();
+  renderTutorial();
+}
 
 // Active input scheme changed → refresh device-appropriate hints.
 function onSchemeChange(scheme) {
@@ -563,6 +594,7 @@ function wireMenu() {
   document.getElementById("btnRestart")?.addEventListener("click", () => {
     app.audio.resume(); app.audio.play("ui"); startGame(app.config);
   });
+  document.getElementById("btnResume")?.addEventListener("click", resumeGame);
   document.getElementById("btnMenu")?.addEventListener("click", () => {
     app.audio.resume(); app.audio.play("ui"); openMenu();
   });
@@ -578,10 +610,11 @@ function wireMenu() {
 // data-row of the menu's Start button — kept as one constant since both
 // focusStartRow() and pollStartHold() need the same value.
 const START_ROW = 4;
+const START_COL = 1; // col 0 is Resume, shown only when a game is in play
 
 function focusStartRow() {
   menu.row = START_ROW;
-  menu.col = 0;
+  menu.col = START_COL;
   menuFocusApply();
 }
 

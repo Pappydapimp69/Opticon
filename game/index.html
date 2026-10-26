@@ -82,10 +82,16 @@
       </div>
 
       <div class="menu-section">
-        <button id="btnStart" class="start-btn" data-row="4" data-col="0">
+        <div class="start-row">
+          <!-- Only shown when the menu was opened from a game still in play.
+               Without it the menu was a one-way door: the only way out was
+               holding Start, which throws the current game away. -->
+          <button id="btnResume" class="resume-btn hidden" data-row="4" data-col="0">Resume</button>
+          <button id="btnStart" class="start-btn" data-row="4" data-col="1">
           <span id="startLabel">Hold to Start</span>
           <div class="hold-track start-hold-track"><div class="hold-fill" id="startHoldFill"></div></div>
         </button>
+        </div>
       </div>
 
       <details class="how">

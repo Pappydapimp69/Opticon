@@ -110,4 +110,7 @@ echo
 echo "== tutorial (a robot pressing only what the card says finishes it; the eye sleeps until the last lesson) =="
 node tests/tutorial.mjs
 echo
+echo "== menu resume (the menu is not a one-way door: Resume / Esc / B return to the same game) =="
+node tests/menu-resume.mjs
+echo
 echo "ALL TESTS PASSED"
