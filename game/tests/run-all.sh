@@ -2,6 +2,9 @@
 # Run the full Opticon 3D test suite. Exits non-zero on any failure.
 set -e
 cd "$(dirname "$0")/.."
+echo "== runner coverage (every test file is wired in here) =="
+node tests/runner-coverage.mjs
+echo
 echo "== no conflict markers / duplicate asset tags =="
 node tests/no-conflict-markers.mjs
 echo
