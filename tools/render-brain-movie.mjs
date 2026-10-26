@@ -25,9 +25,9 @@ import { createRequire } from "module";
 import { execFileSync, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { buildBrainData } from "./brain-data.mjs";
+import { chromium, chromiumPath } from "../game/tests/browser.mjs";
 
 const require = createRequire(import.meta.url);
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -75,7 +75,7 @@ function vttTimestamp(seconds) {
 
 (async () => {
   const browser = await chromium.launch({
-    executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+    executablePath: chromiumPath,
     args: ["--use-gl=swiftshader", "--no-sandbox"],
   });
   const page = await browser.newPage();

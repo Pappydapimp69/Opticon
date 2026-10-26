@@ -1,0 +1,36 @@
+name: Tests
+
+# Runs the full Opticon 3D suite (pure logic + headless Chromium) on every push
+# and pull request. Until this existed the suite only ran by hand, so a broken
+# assumption (e.g. the hardcoded Chromium build path every browser test used)
+# could sit red for weeks without anyone seeing it.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install -g playwright@1.63.0
+          playwright install --with-deps chromium
+
+      - name: Run suite
+        run: bash game/tests/run-all.sh

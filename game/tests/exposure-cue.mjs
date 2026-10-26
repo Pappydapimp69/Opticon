@@ -7,9 +7,9 @@ import http from "http";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { chromium, chromiumPath } from "./browser.mjs";
 
 const require = createRequire(import.meta.url);
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -41,7 +41,7 @@ function check(cond, label) {
   await new Promise((r) => server.listen(PORT, r));
 
   const browser = await chromium.launch({
-    executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+    executablePath: chromiumPath,
     args: ["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist", "--no-sandbox"],
   });
   const errors = [];
@@ -106,6 +106,19 @@ function check(cond, label) {
   // role viewer (the bluff "declares eyes on" line is fine and expected).
   await page.keyboard.press("Space"); // end prisoner turn -> AI watcher acts
   await page.waitForTimeout(1200);
+  // The AI may legitimately HOLD its facing, or catch someone before it ever
+  // turns, so waiting on an AI rotation made this a ~1-in-5 flake. Drive one
+  // real rotation through the real rules function (same module instance the
+  // game uses) so the leak assertions below always have teeth.
+  await page.evaluate(async () => {
+    const { rotateWatcher } = await import("./src/rules.js");
+    const g = window.__opticon.game;
+    if (g.log.some((l) => /turns to face/.test(l.msg))) return;
+    const turn = g.turn, rotated = g.watcher.rotatedThisTurn, facing = g.watcher.facing, status = g.status;
+    g.turn = "Watcher"; g.watcher.rotatedThisTurn = false; g.status = "playing";
+    rotateWatcher(g, 1);
+    g.turn = turn; g.watcher.rotatedThisTurn = rotated; g.watcher.facing = facing; g.status = status;
+  });
   // The on-screen log was removed from the HUD, so the leak guard now
   // checks the SOURCE of truth: what renderLog() would hand a Prisoner-role
   // viewer, plus that no Watcher-only text reached the visible HUD anywhere.

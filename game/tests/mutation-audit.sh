@@ -22,7 +22,7 @@
 #
 # run-all.sh is `set -e`, so a caught mutation exits early and costs seconds;
 # only survivors pay the full runtime. Good property for this.
-cd /home/user/Opticon
+cd "$(dirname "$0")/../.."
 
 declare -a NAMES FILES FROM TO
 

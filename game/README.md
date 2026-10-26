@@ -82,8 +82,10 @@ node game/tests/smoke.mjs prisoner # headless boot + play, console-error check
 node game/tests/wincheck.mjs       # escape end-screen in a real browser
 ```
 
-`tests/run-all.sh` runs everything. Headless tests use the pre-installed
-Chromium via Playwright.
+`tests/run-all.sh` runs everything (CI runs it on every push via
+`.github/workflows/tests.yml`). Headless tests resolve Playwright and Chromium
+through `tests/browser.mjs`: `PLAYWRIGHT_PATH` / `CHROMIUM_PATH` override,
+otherwise a pre-installed `/opt/pw-browsers` build, otherwise Playwright's own.
 
 ## Roadmap beyond beta
 - Online multiplayer (the co-op/save-schema question is tracked in Brain T3).

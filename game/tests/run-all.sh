@@ -65,4 +65,43 @@ echo
 echo "== turn-authority hud (hint/panel track who's really acting, not just game.turn) =="
 node tests/turn-authority-hud.mjs
 echo
+echo "== ai prisoners (companions route, hide, and escape on their own) =="
+node tests/ai-prisoners.mjs
+echo
+echo "== audio settings (volume/mute persist and apply) =="
+node tests/audio-settings.mjs
+echo
+echo "== exposure cue (danger vignette + no rotation leak to the prisoner) =="
+node tests/exposure-cue.mjs
+echo
+echo "== f-key passthrough (browser F-keys are not swallowed) =="
+node tests/fkey-passthrough.mjs
+echo
+echo "== gamepad menu nav =="
+node tests/gamepad-menu-nav.mjs
+echo
+echo "== hold to confirm =="
+node tests/hold-to-confirm.mjs
+echo
+echo "== intro cutscene =="
+node tests/intro-cutscene.mjs
+echo
+echo "== items =="
+node tests/items.mjs
+echo
+echo "== overlay gamepad =="
+node tests/overlay-gamepad.mjs
+echo
+echo "== pass device (hotseat hand-off hides the other side) =="
+node tests/pass-device.mjs
+echo
+echo "== skills =="
+node tests/skills.mjs
+echo
+echo "== views (every camera mode renders without errors) =="
+node tests/views.mjs
+echo
+echo "== window break =="
+node tests/window-break.mjs
+echo
 echo "ALL TESTS PASSED"
