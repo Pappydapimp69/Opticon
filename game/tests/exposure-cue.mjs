@@ -90,12 +90,16 @@ function check(cond, label) {
   check(hasDangerClass, "vignette shows 'danger' class when the prisoner is lit (exposed)");
 
   // Move off any light: exposure should clear next frame.
-  await page.evaluate(() => {
-    const a = window.__opticon;
-    const g = a.game;
+  // "Very unlikely" was not never: on some seeds the far corner (1,1) sat in a
+  // light radius and this failed. Ask the rules for a tile that is not exposed.
+  await page.evaluate(async () => {
+    const { isExposed } = await import("./src/rules.js");
+    const g = window.__opticon.game;
     const p = g.prisoners[g.activePrisoner];
-    // A far corner is very unlikely to be inside any light radius.
-    p.x = 1; p.y = 1;
+    const n = g.map.size;
+    for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) {
+      if (!isExposed(g, x, y, window.__opticon.config.difficulty)) { p.x = x; p.y = y; return; }
+    }
   });
   await page.waitForTimeout(150);
   hasDangerClass = await page.$eval("#dangerVignette", (el) => el.classList.contains("danger"));

@@ -26,6 +26,10 @@ cd game && python3 -m http.server 8000
 - **Watcher (vs AI Prisoner)** — you never see the prisoner; hunt by inference.
 - **2P Hotseat** — pass the device; the prisoner's position is hidden on the
   Watcher's turn.
+- **Tutorial** — a guided first game as the Prisoner: plan, commit, end a
+  turn, noise, light, the camera, then a real escape. The eye cannot catch you
+  until the last step; `Esc` / gamepad Back / the Skip button leaves at any
+  time. Never counted in your record.
 
 ### Controls
 | | Prisoner | Watcher |
@@ -70,6 +74,7 @@ game/
     input.js            keyboard + touch + gamepad → intents
     audio.js            WebAudio SFX + ambient drone
     ui.js               DOM HUD / menu / overlays
+    tutorial.js         guided first game: one table = each step's text + pass test
     main.js             orchestration + game loop
   tests/                Node logic + headless Chromium checks
 ```

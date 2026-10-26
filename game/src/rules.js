@@ -191,6 +191,10 @@ export function createGame(map, opts = {}) {
     // that once at game start keeps both the human skill-use path and the
     // AI's pickSkills path reading the same already-inverted answer.
     dispatchTier: opts.dispatchTier || "medium",
+    // Scans on rounds <= this are graced (no captures). 1 is the normal game:
+    // the eye is still settling on round 1. The tutorial raises it while it
+    // teaches, then drops it to 0 the moment the lessons hand over.
+    graceRounds: opts.graceRounds ?? 1,
     watcher: {
       facing: opts.watcherFacing ?? 0,
       bluff: null, // a direction index the Watcher claims to also be watching
@@ -1139,7 +1143,7 @@ export function watcherScan(game, difficulty = "medium") {
   if (game.turn !== "Watcher") return { ok: false };
   // First-round grace: the eye is still "waking up" — no captures on round 1.
   // This gives players a turn to read the board and the visible gaze before risk.
-  if (game.round <= 1) {
+  if (game.round <= (game.graceRounds ?? 1)) {
     logMsg(game, `Watcher sweeps the yard... (the eye is still settling).`);
     return { ok: true, caught: null, grace: true };
   }

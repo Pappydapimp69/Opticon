@@ -127,6 +127,8 @@ export class Input {
       // you only get three of them.
       KeyF: () => this.onIntent("struggle"),
       KeyR: () => this.onIntent("restart"),
+      // Leave the tutorial and play on. Ignored outside it.
+      Escape: () => this.onIntent("tutorialSkip"),
     };
     if (map[e.code]) {
       if (e.code === "Tab" || e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
@@ -288,6 +290,7 @@ export class Input {
     // split in main.js means the bluff above and this never both land.
     if (edge(2)) this.onIntent("struggle");
     if (edge(9)) this.onIntent("cycleView");  // Start
+    if (edge(8)) this.onIntent("tutorialSkip"); // Back / Select — leave the tutorial
     // Items + skills had NO gamepad route at all — they were keyboard
     // (1-8) and touch-chip only, so a pad player simply could not use half
     // the verbs the game now has. LT (6) cycles which slot is selected and

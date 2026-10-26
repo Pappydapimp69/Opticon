@@ -107,4 +107,7 @@ echo
 echo "== window break =="
 node tests/window-break.mjs
 echo
+echo "== tutorial (a robot pressing only what the card says finishes it; the eye sleeps until the last lesson) =="
+node tests/tutorial.mjs
+echo
 echo "ALL TESTS PASSED"

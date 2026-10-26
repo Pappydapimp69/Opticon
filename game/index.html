@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#05070d" />
   <title>Opticon — 3D</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070b14'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235ad4e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23ff4d5e'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css?v=beta-0.56.0" />
+  <link rel="stylesheet" href="css/style.css?v=beta-0.57.0" />
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -64,6 +64,10 @@
             <span class="pb-title">2P Hotseat</span>
             <span class="pb-sub">Trade the eye between two players.</span>
           </button>
+          <button id="playTutorial" class="play-btn tutorial-btn" data-row="2" data-col="1">
+            <span class="pb-title">Tutorial</span>
+            <span class="pb-sub">New here? Learn to move, stay quiet, and escape. The eye sleeps until you're ready.</span>
+          </button>
         </div>
       </div>
 
@@ -86,6 +90,7 @@
 
       <details class="how">
         <summary data-row="5" data-col="0" tabindex="0">How to play</summary>
+        <p class="how-goal"><b>New here?</b> Pick <b>Tutorial</b> above — it walks you through your first escape one step at a time, and the eye cannot catch you until the last step.</p>
         <p class="how-goal">As a Prisoner you win by reaching the gate <b>yourself</b>. As the Watcher you win by catching <b>every</b> prisoner — one of them getting out is a loss. Play either side, alone or 2-player.</p>
         <ul>
           <li><b>Prisoner</b> — Move up to 3 tiles/turn (WASD / arrows). Directions are <b>relative to the camera</b>: up means the top of the screen as drawn, whatever compass direction that happens to be, so spinning the view never inverts your controls. One step is quiet; 2+ tiles in a turn leaves <b>noise</b> behind — a red pulse the Watcher can see. A <b>red screen edge + heartbeat</b> means the Watcher's gaze covers you RIGHT NOW while you're lit or noisy — that's the danger signal, not the text log. Break a window for a loud shortcut or distraction (Shift + direction). You run with two AI companions who move on their own — but <b>only your own escape wins the game</b>. They can draw the eye, break ground ahead of you, or get taken; they cannot carry you out. Reach the gate yourself or you lose.</li>
@@ -151,6 +156,14 @@
         <button id="btnMenu" class="mini" title="Main menu"><span class="mini-label">Menu</span><span class="mini-icon">☰</span></button>
         <button id="btnRestart" class="mini" title="Restart this game"><span class="mini-label">Restart</span><span class="mini-icon">↻</span></button>
       </div>
+    </div>
+
+    <!-- Guided first game. Text and pass test come from one table in
+         src/tutorial.js; main.js renderTutorial() fills this in. -->
+    <div id="tutorialCard" class="tutorial-card hidden" role="status" aria-live="polite">
+      <div class="tutorial-head"><span id="tutorialStep" class="tutorial-step">Tutorial</span><span id="tutorialTitle" class="tutorial-title"></span></div>
+      <p id="tutorialText" class="tutorial-text"></p>
+      <button id="tutorialSkip" class="tutorial-skip mini">Skip tutorial</button>
     </div>
 
     <div id="banner" class="banner"></div>
@@ -236,6 +249,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/main.js?v=beta-0.56.0"></script>
+  <script type="module" src="src/main.js?v=beta-0.57.0"></script>
 </body>
 </html>

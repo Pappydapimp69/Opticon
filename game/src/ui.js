@@ -205,7 +205,7 @@ export class UI {
     const stats = `${flavor} (${game.round} ${roundWord}${meta.difficulty ? `, ${meta.difficulty}` : ""})`;
     // The running record is the reason to press Play again, so it belongs on
     // the screen that offers that button — not only back on the menu.
-    this.el.overlayText.textContent = [stats, group, meta.record].filter(Boolean).join("\n");
+    this.el.overlayText.textContent = [stats, group, meta.record, meta.note].filter(Boolean).join("\n");
   }
 }
 

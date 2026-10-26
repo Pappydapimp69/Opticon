@@ -92,8 +92,9 @@ html, body {
 .pb-record:empty { display: none; }
 .prisoner-btn:hover { border-color: var(--prisoner); box-shadow: 0 8px 30px rgba(90,212,230,0.18); }
 .watcher-btn:hover { border-color: var(--watcher); box-shadow: 0 8px 30px rgba(255,107,122,0.18); }
-.hotseat-btn { grid-column: 1 / -1; }
 .hotseat-btn:hover { border-color: #a0b6ff; }
+.tutorial-btn { border-color: rgba(89,247,166,0.35); }
+.tutorial-btn:hover { border-color: var(--exit); box-shadow: 0 8px 30px rgba(89,247,166,0.16); }
 .play-btn.ghost { background: transparent; align-items: center; }
 
 /* ---- Hold-to-confirm (intro splash + menu Start button) ---- */
@@ -524,3 +525,26 @@ html, body {
 .susp-track { flex: 1; height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
 .susp-fill { height: 100%; background: linear-gradient(90deg, #ff5c1a, #ffb46b); border-radius: 3px; transition: width .25s ease; }
 @media (max-width: 720px) { .suspicion-hud { top: 54px; right: 10px; min-width: 92px; padding: 6px 8px; } }
+
+/* ---- Tutorial card ----
+   Top-left under the rail, clear of the centred banner and the right-hand
+   suspicion readout (Watcher-only, so never on screen with this). */
+.tutorial-card {
+  position: absolute; top: 58px; left: 12px; z-index: 6;
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(10, 16, 28, 0.9); border: 1px solid rgba(89,247,166,0.45);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+.tutorial-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.tutorial-step {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--exit);
+}
+.tutorial-title { font-size: 15px; font-weight: 700; }
+.tutorial-text { margin: 0 0 8px; font-size: 13px; line-height: 1.45; color: var(--text); }
+.tutorial-skip { font-size: 11px; padding: 4px 10px; }
+.banner { z-index: 7; }
+@media (max-width: 720px) {
+  .tutorial-card { top: 52px; left: 10px; padding: 8px 10px; }
+  .tutorial-text { font-size: 12px; margin-bottom: 6px; }
+}
