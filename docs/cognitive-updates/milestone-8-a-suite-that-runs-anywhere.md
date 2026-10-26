@@ -23,6 +23,12 @@ Prisoner; the AI can hold, or a capture can end play first (~1 in 5 failed).
 It now drives one real `rotateWatcher` call.
 
 **CI.** `.github/workflows/tests.yml` runs `run-all.sh` on every push and PR.
+Its first two runs went red on races a fast local machine never lost:
+hotseat smoke's `KeyV` landing on the pass-the-device gate, intro-cutscene
+pressing a key before the human held the turn, and overlay-gamepad carrying
+a private copy of the escape setup that missed all three fixes wincheck had
+already received. Both escape tests now share `tests/escape.mjs`. The suite
+was then re-run with every core pinned by busy loops: still green.
 
 ## Cognitive update
 
