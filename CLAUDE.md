@@ -24,6 +24,14 @@
   LINE` fields (see `.brain/memory/incoming/`); tensions/exploration use `### `
   blocks. Malformed entries get held on `sync`.
 <!-- brain:pointer v2 — managed by `brain link`/`sync`; edits here are overwritten -->
+### Working rules (from the owner)
+- **Check the design rules first** (`Panopticon.md`, `docs/adr/`, open Brain
+  tensions) before building a change.
+- **One fast test per change, run in parallel** — the tests that change
+  touches, not the full suite. Don't run `run-all.sh` locally; CI runs it.
+- **Time-box tuning.** One focused attempt per flaky test or tweak, then
+  report and move on instead of iterating.
+
 ## Cognitive system: Brain (linked via `brain` CLI)
 This project is linked to the Brain cognitive system. Do not read the node
 repos directly — use the CLI.
